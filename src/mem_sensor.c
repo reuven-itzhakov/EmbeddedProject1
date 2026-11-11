@@ -14,12 +14,18 @@ int main(int argc, char *argv[]) {
     if(argc > 1){
         interval = atof(argv[1]) * 1000000;
     }
+    
     while(1) {
-        FILE *file_tmp = fopen("/tmp/sysmon/mem.dat", "w");
         FILE *file = fopen("/proc/meminfo", "r");
-        
         if(file == NULL) {
             perror("Error opening /proc/meminfo");
+            return 1;
+        }
+        
+        FILE *file_tmp = fopen("/tmp/sysmon/mem.dat", "w");
+        if(file_tmp == NULL) {
+            perror("Error opening /tmp/sysmon/mem.dat");
+            fclose(file);
             return 1;
         }
 
