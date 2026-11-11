@@ -15,20 +15,20 @@ int main(int argc, char *argv[]) {
         interval = atof(argv[1]) * 1000000;
     }
 
-    while(1) {
-        FILE *file = fopen("/proc/meminfo", "r");
-        if(file == NULL) {
-            perror("Error opening /proc/meminfo");
-            return 1;
-        }
-        
-        FILE *file_tmp = fopen("/tmp/sysmon/mem.dat", "w");
-        if(file_tmp == NULL) {
-            perror("Error opening /tmp/sysmon/mem.dat");
-            fclose(file);
-            return 1;
-        }
+    FILE *file = fopen("/proc/meminfo", "r");
+    if(file == NULL) {
+        perror("Error opening /proc/meminfo");
+        return 1;
+    }
+    
+    FILE *file_tmp = fopen("/tmp/sysmon/mem.dat", "w");
+    if(file_tmp == NULL) {
+        perror("Error opening /tmp/sysmon/mem.dat");
+        fclose(file);
+        return 1;
+    }
 
+    while(1) {
         char buffer[256];
         while(fgets(buffer, sizeof(buffer), file) != NULL) {
             if(strncmp(buffer, "MemTotal:",      9) == 0
@@ -40,9 +40,11 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        fclose(file);
-        fclose(file_tmp);
-        usleep(interval); // Update every second
+        usleep(interval);
     }
+
+    fclose(file);
+    fclose(file_tmp);
+    
     return 0;
 }
