@@ -18,8 +18,6 @@ int main(int argc, char *argv[]) {
 
     double loadavg1, loadavg5, loadavg15;
 
-    mkdir("/tmp/sysmon", 0777);
-
     while(1) {
         FILE *file = fopen("/proc/loadavg", "r");
         if(file == NULL) {

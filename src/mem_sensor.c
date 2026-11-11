@@ -15,8 +15,6 @@ int main(int argc, char *argv[]) {
         interval = atof(argv[1]) * 1000000;
     }
 
-    mkdir("/tmp/sysmon", 0777);
-
     while(1) {
         FILE *file = fopen("/proc/meminfo", "r");
         if(file == NULL) {
