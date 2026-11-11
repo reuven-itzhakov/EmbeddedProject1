@@ -7,6 +7,7 @@ int main(int argc, char *argv[]) {
     if(argc > 1 && strcmp(argv[1], "--help") == 0) {
         printf("Usage: %s [interval]\n", argv[0]);
         printf("interval: Time in seconds between updates (default is 1 second)\n");
+        printf("This program reads data from memory sensor and displays it.\n");
         return 0;
     }
 
@@ -39,7 +40,7 @@ int main(int argc, char *argv[]) {
                 fprintf(file_tmp, "%s", buffer);
             }
         }
-        
+
         fclose(file);
         fclose(file_tmp);
 
