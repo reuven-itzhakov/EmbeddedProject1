@@ -1,10 +1,13 @@
 CFLAG = -Wall -g
 CC = gcc
+BIN_DIR = bin
+INC_DIR = include
+SRC_DIR = src
 
-%: %.c
+$(BIN_DIR)/%: $(SRC_DIR)/%.c
 	$(CC) $(CFLAG) $< -o $@
 
-all: sysmond mem_sensor pu_sensor proc_sensor
+all: $(BIN_DIR)/cpu_sensor $(BIN_DIR)/mem_sensor $(BIN_DIR)/proc_sensor $(BIN_DIR)/sysmond
 
 clean:
-	rm -f sysmond mem_sensor pu_sensor proc_sensor
+	rm -f $(BIN_DIR)/*
