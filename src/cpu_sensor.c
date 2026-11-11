@@ -16,22 +16,22 @@ int main(int argc, char *argv[]) {
         interval = atof(argv[1]) * 1000000;
     }
     
-    double loadavg1, loadavg5, loadavg15;
-
-    FILE *file = fopen("/proc/loadavg", "r");
-    if(file == NULL) {
-        perror("Error opening /proc/loadavg");
-        return 1;
-    }
-    
-    FILE *file_tmp = fopen("/tmp/sysmon/cpu.dat", "w");
-    if(file_tmp == NULL) {
-        perror("Error opening /tmp/sysmon/cpu.dat");
-        fclose(file);
-        return 1;
-    }
-
     while(1) {
+        double loadavg1, loadavg5, loadavg15;
+    
+        FILE *file = fopen("/proc/loadavg", "r");
+        if(file == NULL) {
+            perror("Error opening /proc/loadavg");
+            return 1;
+        }
+        
+        FILE *file_tmp = fopen("/tmp/sysmon/cpu.dat", "w");
+        if(file_tmp == NULL) {
+            perror("Error opening /tmp/sysmon/cpu.dat");
+            fclose(file);
+            return 1;
+        }
+
         if(fscanf(file, "%lf %lf %lf", &loadavg1, &loadavg5, &loadavg15) == 3) {
             fprintf(file_tmp, "Load Average (1 min): %.2f\n", loadavg1);
             fprintf(file_tmp, "Load Average (5 min): %.2f\n", loadavg5);
@@ -40,11 +40,11 @@ int main(int argc, char *argv[]) {
             fprintf(file_tmp, "Error reading load averages\n");
         }
 
+        fclose(file);
+        fclose(file_tmp);
+
         usleep(interval);
     }
-
-    fclose(file);
-    fclose(file_tmp);
 
     return 0;
 }

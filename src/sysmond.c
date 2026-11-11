@@ -16,30 +16,32 @@ int main(int argc, char *argv[]) {
         interval = atof(argv[1]) * 1000000;
     }
 
-    FILE *mem_file = fopen("/tmp/sysmon/mem.dat", "r");
-    if(mem_file == NULL) {
-        perror("Error opening /tmp/sysmon/mem.dat");
-        return 1;
-    }
-    
-    FILE *cpu_file = fopen("/tmp/sysmon/cpu.dat", "r");
-    if(cpu_file == NULL) {
-        perror("Error opening /tmp/sysmon/cpu.dat");
-        fclose(mem_file);
-        return 1;
-    }
-    
-    FILE *proc_file = fopen("/tmp/sysmon/proc.dat", "r");
-    if(proc_file == NULL) {
-        perror("Error opening /tmp/sysmon/proc.dat");
-        fclose(mem_file);
-        fclose(cpu_file);
-        return 1;
-    }
-
     mkdir("/tmp/sysmon", 0777);
-
+    
     while(1) {
+        system("clear");
+
+        FILE *mem_file = fopen("/tmp/sysmon/mem.dat", "r");
+        if(mem_file == NULL) {
+            perror("Error opening /tmp/sysmon/mem.dat");
+            return 1;
+        }
+        
+        FILE *cpu_file = fopen("/tmp/sysmon/cpu.dat", "r");
+        if(cpu_file == NULL) {
+            perror("Error opening /tmp/sysmon/cpu.dat");
+            fclose(mem_file);
+            return 1;
+        }
+        
+        FILE *proc_file = fopen("/tmp/sysmon/proc.dat", "r");
+        if(proc_file == NULL) {
+            perror("Error opening /tmp/sysmon/proc.dat");
+            fclose(mem_file);
+            fclose(cpu_file);
+            return 1;
+        }
+
         char mem_buffer[256];
         char cpu_buffer[256];
         char proc_buffer[256];
@@ -56,11 +58,12 @@ int main(int argc, char *argv[]) {
             printf("%s", proc_buffer);
         }
 
+        fclose(mem_file);
+        fclose(cpu_file);
+        fclose(proc_file);
+
         usleep(interval);
     }
 
-    fclose(mem_file);
-    fclose(cpu_file);
-    fclose(proc_file);
     return 0;
 }

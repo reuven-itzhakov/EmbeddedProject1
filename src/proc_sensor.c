@@ -17,24 +17,24 @@ int main(int argc, char *argv[]) {
     if(argc > 1){
         interval = atof(argv[1]) * 1000000;
     }
-
-    DIR *dir = opendir("/proc");
-    if (dir == NULL) {
-        perror("Error opening /proc");
-        return 1;
-    }
-
-    FILE *file_tmp = fopen("/tmp/sysmon/proc.dat", "w");
-    if(file_tmp == NULL) {
-        perror("Error opening /tmp/sysmon/proc.dat");
-        closedir(dir);
-        return 1;
-    }
-
+    
     while(1){
+        DIR *dir = opendir("/proc");
+        if (dir == NULL) {
+            perror("Error opening /proc");
+            return 1;
+        }
+    
+        FILE *file_tmp = fopen("/tmp/sysmon/proc.dat", "w");
+        if(file_tmp == NULL) {
+            perror("Error opening /tmp/sysmon/proc.dat");
+            closedir(dir);
+            return 1;
+        }
+
         size_t total = 0;
         struct dirent *entry;
-        
+
         while((entry = readdir(dir)) != NULL) {
             if (atoi(entry->d_name) > 0) {
                 total++;
@@ -42,11 +42,12 @@ int main(int argc, char *argv[]) {
         }
         
         fprintf(file_tmp, "Total number of processes: %zu\n", total);
+
+        fclose(file_tmp);
+        closedir(dir);
+
         usleep(interval);
     }
     
-    fclose(file_tmp);
-    closedir(dir);
-
     return 0;
 }
