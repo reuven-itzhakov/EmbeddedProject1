@@ -13,7 +13,7 @@ int main(int argc, char *argv[]) {
         return 0;
     }
     
-    useconds_t interval = 1;
+    useconds_t interval = 1000000;
     if(argc > 1){
         interval = atof(argv[1]) * 1000000;
     }

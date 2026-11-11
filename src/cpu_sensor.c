@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <string.h>
+#include <sys/stat.h>
 
 int main(int argc, char *argv[]) {
     if(argc > 1 && strcmp(argv[1], "--help") == 0) {
@@ -9,10 +11,12 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
-    useconds_t interval = 1;
+    useconds_t interval = 1000000;
     if(argc > 1){
         interval = atof(argv[1]) * 1000000;
     }
+
+    double loadavg1, loadavg5, loadavg15;
 
     mkdir("/tmp/sysmon", 0777);
 
@@ -30,10 +34,14 @@ int main(int argc, char *argv[]) {
             return 1;
         }
         
-        char buffer[256];
-        while(fgets(buffer, sizeof(buffer), file) != NULL) {
-            fprintf(file_tmp, "%s", buffer);
+        if(fscanf(file, "%lf %lf %lf", &loadavg1, &loadavg5, &loadavg15) == 3) {
+            fprintf(file_tmp, "Load Average (1 min): %.2f\n", loadavg1);
+            fprintf(file_tmp, "Load Average (5 min): %.2f\n", loadavg5);
+            fprintf(file_tmp, "Load Average (15 min): %.2f\n", loadavg15);
+        } else {
+            fprintf(file_tmp, "Error reading load averages\n");
         }
+
 
         fclose(file);
         fclose(file_tmp);
