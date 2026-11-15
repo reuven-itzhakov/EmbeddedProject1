@@ -7,10 +7,6 @@
 #include <sys/wait.h>
 #include <dirent.h>
 
-sig_atomic_t child_exited = 0;
-sig_atomic_t child_pid = 0;
-sig_atomic_t child_status = 0;
-
 typedef struct {
     // Memory Metrics
     long mem_total;
@@ -33,17 +29,6 @@ typedef struct {
 } SystemState;
 
 SystemState* state;
-
-void handle_sigchld(int sig) {
-    int status;
-    pid_t pid;
-    
-    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
-        child_exited = 1;
-        child_pid = pid;
-        child_status = status;
-    }
-}
 
 void *mem_sensor(void *arg) {
     useconds_t interval = (useconds_t)arg;
@@ -213,15 +198,6 @@ int main(int argc, char *argv[]) {
         printf("Load Average (15 min): %.2f\n", state->load15);
         printf("Total number of processes: %zu\n", state->total_procs);
         pthread_mutex_unlock(&state->lock);
-
-        if (child_exited) {
-            if (WIFEXITED(child_status)) {
-                printf("\nChild process (PID: %d) exited normally with status %d\n", child_pid, WEXITSTATUS(child_status));
-            } else if (WIFSIGNALED(child_status)) {
-                printf("\nChild process (PID: %d) was killed by signal %d\n", child_pid, WTERMSIG(child_status));
-            }
-            child_exited = 0;
-        }
 
         usleep(interval);
     }
