@@ -1,35 +1,6 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/stat.h>
-#include <string.h>
-#include <unistd.h>
-#include <signal.h>
-#include <sys/wait.h>
-#include <dirent.h>
-#include <pthread.h>
+#include "sysmond.h"
 
-typedef struct {
-    // Memory Metrics
-    long mem_total;
-    long mem_free;
-    long mem_avail;
-    long swap_total;
-    long swap_free;
-
-    // CPU Load Metrics
-    double load1;
-    double load5;
-    double load15;
-
-    // Process Metrics
-    int total_procs;
-
-    // Synchronization
-    pthread_mutex_t lock;
-    pthread_cond_t alert_cond;
-} SystemState;
-
-SystemState* state;
+SystemState* state = NULL;
 
 void *mem_sensor(void *arg) {
     useconds_t interval = *(useconds_t*)arg;
@@ -97,6 +68,12 @@ void *cpu_sensor(void *arg) {
             perror("Error reading load averages");
         }
 
+        if(loadavg1 > 1.5){
+            pthread_mutex_lock(&state->lock);
+            pthread_cond_signal(&state->alert_cond);
+            pthread_mutex_unlock(&state->lock);
+        }
+
         fclose(file);
 
         usleep(interval);
@@ -129,6 +106,16 @@ void *proc_sensor(void *arg) {
         closedir(dir);
 
         usleep(interval);
+    }
+    return NULL;
+}
+
+void *alert_handler(void *arg) {
+    while(1) {
+        pthread_mutex_lock(&state->lock);
+        pthread_cond_wait(&state->alert_cond, &state->lock);
+        fprintf(stderr, "ALERT: CPU load average over 1 minute is above 1.5!\n");
+        pthread_mutex_unlock(&state->lock);
     }
     return NULL;
 }
@@ -175,6 +162,12 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    pthread_t alert_thread;
+    if(pthread_create(&alert_thread, NULL, alert_handler, NULL) != 0) {
+        perror("pthread_create failed");
+        return 1;
+    }
+
     while(1) {
         system("clear");
 
@@ -196,6 +189,6 @@ int main(int argc, char *argv[]) {
     pthread_join(tid_mem_sensor, NULL);
     pthread_join(tid_cpu_sensor, NULL);
     pthread_join(tid_proc_sensor, NULL);
-
+    pthread_join(alert_thread, NULL);
     return 0;
 }
