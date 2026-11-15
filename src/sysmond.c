@@ -5,10 +5,34 @@
 #include <unistd.h>
 #include <signal.h>
 #include <sys/wait.h>
+#include <dirent.h>
 
 sig_atomic_t child_exited = 0;
 sig_atomic_t child_pid = 0;
 sig_atomic_t child_status = 0;
+
+typedef struct {
+    // Memory Metrics
+    long mem_total;
+    long mem_free;
+    long mem_avail;
+    long swap_total;
+    long swap_free;
+
+    // CPU Load Metrics
+    double load1;
+    double load5;
+    double load15;
+
+    // Process Metrics
+    int total_procs;
+
+    // Synchronization
+    pthread_mutex_t lock;
+    pthread_cond_t alert_cond;
+} SystemState;
+
+SystemState* state;
 
 void handle_sigchld(int sig) {
     int status;
@@ -19,6 +43,108 @@ void handle_sigchld(int sig) {
         child_pid = pid;
         child_status = status;
     }
+}
+
+void *mem_sensor(void *arg) {
+    useconds_t interval = (useconds_t)arg;
+    while(1) {
+        FILE *file = fopen("/proc/meminfo", "r");
+        if(file == NULL) {
+            perror("Error opening /proc/meminfo");
+            return 1;
+        }
+        
+        char buffer[256];
+        long m_total = 0, m_free = 0, m_avail = 0, s_total = 0, s_free = 0;
+
+        while (fgets(buffer, sizeof(buffer), file) != NULL) {
+            if (strncmp(buffer, "MemTotal:", 9) == 0) {
+                m_total = strtol(buffer + 9, NULL, 10);
+            } 
+            else if (strncmp(buffer, "MemFree:", 8) == 0) {
+                m_free = strtol(buffer + 8, NULL, 10);
+            } 
+            else if (strncmp(buffer, "MemAvailable:", 13) == 0) {
+                m_avail = strtol(buffer + 13, NULL, 10);
+            } 
+            else if (strncmp(buffer, "SwapTotal:", 10) == 0) {
+                s_total = strtol(buffer + 10, NULL, 10);
+            } 
+            else if (strncmp(buffer, "SwapFree:", 9) == 0) {
+                s_free = strtol(buffer + 9, NULL, 10);
+            }
+        }
+
+        pthread_mutex_lock(&state->lock);
+        state->mem_total  = m_total;
+        state->mem_free   = m_free;
+        state->mem_avail  = m_avail;
+        state->swap_total = s_total;
+        state->swap_free  = s_free;
+        pthread_mutex_unlock(&state->lock);
+
+        fclose(file);
+
+        usleep(interval);
+    }
+    return NULL;
+}
+
+void *cpu_sensor(void *arg) {
+    useconds_t interval = (useconds_t)arg;
+    while(1) {
+        double loadavg1, loadavg5, loadavg15;
+    
+        FILE *file = fopen("/proc/loadavg", "r");
+        if(file == NULL) {
+            perror("Error opening /proc/loadavg");
+            return 1;
+        }
+        
+        if(fscanf(file, "%lf %lf %lf", &loadavg1, &loadavg5, &loadavg15) == 3) {
+            pthread_mutex_lock(&state->lock);
+            state->load1 = loadavg1;
+            state->load5 = loadavg5;
+            state->load15 = loadavg15;
+            pthread_mutex_unlock(&state->lock);
+        } else {
+            perror("Error reading load averages");
+        }
+
+        fclose(file);
+
+        usleep(interval);
+    }
+    return NULL;
+}
+
+void *proc_sensor(void *arg) {
+    useconds_t interval = (useconds_t)arg;
+    while(1){
+        DIR *dir = opendir("/proc");
+        if (dir == NULL) {
+            perror("Error opening /proc");
+            return 1;
+        }
+    
+        size_t total = 0;
+        struct dirent *entry;
+
+        while((entry = readdir(dir)) != NULL) {
+            if (atoi(entry->d_name) > 0) {
+                total++;
+            }
+        }
+        
+        pthread_mutex_lock(&state->lock);
+        state->total_procs = total;
+        pthread_mutex_unlock(&state->lock);
+
+        closedir(dir);
+
+        usleep(interval);
+    }
+    return NULL;
 }
 
 int main(int argc, char *argv[]) {
@@ -36,36 +162,30 @@ int main(int argc, char *argv[]) {
 
     mkdir("/tmp/sysmon", 0777);
     
-    char interval_str[32];
-    snprintf(interval_str, sizeof(interval_str), "%.2f", (double)interval / 1000000.0);
-
-    pid_t pid_mem_sensor = fork();
-    if(pid_mem_sensor < 0) {
-        perror("Fork failed");
-        return 1;
-    } else if(pid_mem_sensor == 0) {
-        execl("./bin/mem_sensor", "./bin/mem_sensor", interval_str, NULL);
-        perror("Failed to start mem_sensor");
+    state = malloc(sizeof(SystemState));
+    if(state == NULL) {
+        perror("Error allocating memory for SystemState");
         return 1;
     }
 
-    pid_t pid_cpu_sensor = fork();
-    if(pid_cpu_sensor < 0) {
-        perror("Fork failed");
-        return 1;
-    } else if(pid_cpu_sensor == 0) {
-        execl("./bin/cpu_sensor", "./bin/cpu_sensor", interval_str, NULL);
-        perror("Failed to start cpu_sensor");
+    pthread_mutex_init(&state->lock, NULL);
+    pthread_cond_init(&state->alert_cond, NULL);
+
+    pthread_t tid_mem_sensor;
+    if(pthread_create(&tid_mem_sensor, NULL, mem_sensor, (void*)interval) != 0) {
+        perror("pthread_create failed");
         return 1;
     }
 
-    pid_t pid_proc_sensor = fork();
-    if(pid_proc_sensor < 0) {
-        perror("Fork failed");
+    pthread_t tid_cpu_sensor;
+    if(pthread_create(&tid_cpu_sensor, NULL, cpu_sensor, (void*)interval) != 0) {
+        perror("pthread_create failed");
         return 1;
-    } else if(pid_proc_sensor == 0) {
-        execl("./bin/proc_sensor", "./bin/proc_sensor", interval_str, NULL);
-        perror("Failed to start proc_sensor");
+    }
+
+    pthread_t tid_proc_sensor;
+    if(pthread_create(&tid_proc_sensor, NULL, proc_sensor, (void*)interval) != 0) {
+        perror("pthread_create failed");
         return 1;
     }
 
@@ -81,46 +201,18 @@ int main(int argc, char *argv[]) {
 
     while(1) {
         system("clear");
-        FILE *mem_file = fopen("/tmp/sysmon/mem.dat", "r");
-        if(mem_file == NULL) {
-            perror("Error opening /tmp/sysmon/mem.dat");
-            return 1;
-        }
-        
-        FILE *cpu_file = fopen("/tmp/sysmon/cpu.dat", "r");
-        if(cpu_file == NULL) {
-            perror("Error opening /tmp/sysmon/cpu.dat");
-            fclose(mem_file);
-            return 1;
-        }
-        
-        FILE *proc_file = fopen("/tmp/sysmon/proc.dat", "r");
-        if(proc_file == NULL) {
-            perror("Error opening /tmp/sysmon/proc.dat");
-            fclose(mem_file);
-            fclose(cpu_file);
-            return 1;
-        }
 
-        char mem_buffer[256];
-        char cpu_buffer[256];
-        char proc_buffer[256];
-
-        while(fgets(mem_buffer, sizeof(mem_buffer), mem_file) != NULL) {
-            printf("%s", mem_buffer);
-        }
-        
-        while(fgets(cpu_buffer, sizeof(cpu_buffer), cpu_file) != NULL) {
-            printf("%s", cpu_buffer);
-        }
-        
-        while(fgets(proc_buffer, sizeof(proc_buffer), proc_file) != NULL) {
-            printf("%s", proc_buffer);
-        }
-
-        fclose(mem_file);
-        fclose(cpu_file);
-        fclose(proc_file);
+        pthread_mutex_lock(&state->lock);
+        printf("MemTotal:        %zu kB\n", state->mem_total);
+        printf("MemFree:         %zu kB\n", state->mem_free);
+        printf("MemAvailable:    %zu kB\n", state->mem_avail);
+        printf("SwapTotal:       %zu kB\n", state->swap_total);
+        printf("SwapFree:        %zu kB\n", state->swap_free);
+        printf("Load Average (1 min): %.2f\n", state->load1);
+        printf("Load Average (5 min): %.2f\n", state->load5);
+        printf("Load Average (15 min): %.2f\n", state->load15);
+        printf("Total number of processes: %zu\n", state->total_procs);
+        pthread_mutex_unlock(&state->lock);
 
         if (child_exited) {
             if (WIFEXITED(child_status)) {
@@ -133,6 +225,10 @@ int main(int argc, char *argv[]) {
 
         usleep(interval);
     }
+
+    pthread_join(tid_mem_sensor, NULL);
+    pthread_join(tid_cpu_sensor, NULL);
+    pthread_join(tid_proc_sensor, NULL);
 
     return 0;
 }
