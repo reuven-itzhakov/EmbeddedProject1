@@ -3,6 +3,23 @@
 #include <sys/stat.h>
 #include <string.h>
 #include <unistd.h>
+#include <signal.h>
+#include <sys/wait.h>
+
+sig_atomic_t child_exited = 0;
+sig_atomic_t child_pid = 0;
+sig_atomic_t child_status = 0;
+
+void handle_sigchld(int sig) {
+    int status;
+    pid_t pid;
+    
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        child_exited = 1;
+        child_pid = pid;
+        child_status = status;
+    }
+}
 
 int main(int argc, char *argv[]) {
     if(argc > 1 && strcmp(argv[1], "--help") == 0) {
@@ -52,6 +69,16 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    struct sigaction sa;
+    sa.sa_handler = &handle_sigchld;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
+    if (sigaction(SIGCHLD, &sa, NULL) == -1) {
+        perror("sigaction failed");
+        return 1;
+    }
+
     while(1) {
         system("clear");
         FILE *mem_file = fopen("/tmp/sysmon/mem.dat", "r");
@@ -94,6 +121,15 @@ int main(int argc, char *argv[]) {
         fclose(mem_file);
         fclose(cpu_file);
         fclose(proc_file);
+
+        if (child_exited) {
+            if (WIFEXITED(child_status)) {
+                printf("\nChild process (PID: %d) exited normally with status %d\n", child_pid, WEXITSTATUS(child_status));
+            } else if (WIFSIGNALED(child_status)) {
+                printf("\nChild process (PID: %d) was killed by signal %d\n", child_pid, WTERMSIG(child_status));
+            }
+            child_exited = 0;
+        }
 
         usleep(interval);
     }
