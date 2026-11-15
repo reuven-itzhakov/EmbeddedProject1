@@ -20,7 +20,7 @@ int main(int argc, char *argv[]) {
     mkdir("/tmp/sysmon", 0777);
     
     char interval_str[32];
-    snprintf(interval_str, sizeof(interval_str), "%u", interval);
+    snprintf(interval_str, sizeof(interval_str), "%.2f", (double)interval / 1000000.0);
 
     pid_t pid_mem_sensor = fork();
     if(pid_mem_sensor < 0) {
@@ -53,7 +53,7 @@ int main(int argc, char *argv[]) {
     }
 
     while(1) {
-        // system("clear");
+        system("clear");
         FILE *mem_file = fopen("/tmp/sysmon/mem.dat", "r");
         if(mem_file == NULL) {
             perror("Error opening /tmp/sysmon/mem.dat");
