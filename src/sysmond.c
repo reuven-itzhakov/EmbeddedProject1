@@ -19,9 +19,41 @@ int main(int argc, char *argv[]) {
 
     mkdir("/tmp/sysmon", 0777);
     
-    while(1) {
-        system("clear");
+    char interval_str[32];
+    snprintf(interval_str, sizeof(interval_str), "%u", interval);
 
+    pid_t pid_mem_sensor = fork();
+    if(pid_mem_sensor < 0) {
+        perror("Fork failed");
+        return 1;
+    } else if(pid_mem_sensor == 0) {
+        execl("./bin/mem_sensor", "./bin/mem_sensor", interval_str, NULL);
+        perror("Failed to start mem_sensor");
+        return 1;
+    }
+
+    pid_t pid_cpu_sensor = fork();
+    if(pid_cpu_sensor < 0) {
+        perror("Fork failed");
+        return 1;
+    } else if(pid_cpu_sensor == 0) {
+        execl("./bin/cpu_sensor", "./bin/cpu_sensor", interval_str, NULL);
+        perror("Failed to start cpu_sensor");
+        return 1;
+    }
+
+    pid_t pid_proc_sensor = fork();
+    if(pid_proc_sensor < 0) {
+        perror("Fork failed");
+        return 1;
+    } else if(pid_proc_sensor == 0) {
+        execl("./bin/proc_sensor", "./bin/proc_sensor", interval_str, NULL);
+        perror("Failed to start proc_sensor");
+        return 1;
+    }
+
+    while(1) {
+        // system("clear");
         FILE *mem_file = fopen("/tmp/sysmon/mem.dat", "r");
         if(mem_file == NULL) {
             perror("Error opening /tmp/sysmon/mem.dat");
