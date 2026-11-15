@@ -6,6 +6,7 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <dirent.h>
+#include <pthread.h>
 
 typedef struct {
     // Memory Metrics
@@ -31,12 +32,12 @@ typedef struct {
 SystemState* state;
 
 void *mem_sensor(void *arg) {
-    useconds_t interval = (useconds_t)arg;
+    useconds_t interval = *(useconds_t*)arg;
     while(1) {
         FILE *file = fopen("/proc/meminfo", "r");
         if(file == NULL) {
             perror("Error opening /proc/meminfo");
-            return 1;
+            return NULL;
         }
         
         char buffer[256];
@@ -76,14 +77,14 @@ void *mem_sensor(void *arg) {
 }
 
 void *cpu_sensor(void *arg) {
-    useconds_t interval = (useconds_t)arg;
+    useconds_t interval = *(useconds_t*)arg;
     while(1) {
         double loadavg1, loadavg5, loadavg15;
     
         FILE *file = fopen("/proc/loadavg", "r");
         if(file == NULL) {
             perror("Error opening /proc/loadavg");
-            return 1;
+            return NULL;
         }
         
         if(fscanf(file, "%lf %lf %lf", &loadavg1, &loadavg5, &loadavg15) == 3) {
@@ -104,12 +105,12 @@ void *cpu_sensor(void *arg) {
 }
 
 void *proc_sensor(void *arg) {
-    useconds_t interval = (useconds_t)arg;
+    useconds_t interval = *(useconds_t*)arg;
     while(1){
         DIR *dir = opendir("/proc");
         if (dir == NULL) {
             perror("Error opening /proc");
-            return 1;
+            return NULL;
         }
     
         size_t total = 0;
@@ -157,30 +158,20 @@ int main(int argc, char *argv[]) {
     pthread_cond_init(&state->alert_cond, NULL);
 
     pthread_t tid_mem_sensor;
-    if(pthread_create(&tid_mem_sensor, NULL, mem_sensor, (void*)interval) != 0) {
+    if(pthread_create(&tid_mem_sensor, NULL, mem_sensor, (void*)&interval) != 0) {
         perror("pthread_create failed");
         return 1;
     }
 
     pthread_t tid_cpu_sensor;
-    if(pthread_create(&tid_cpu_sensor, NULL, cpu_sensor, (void*)interval) != 0) {
+    if(pthread_create(&tid_cpu_sensor, NULL, cpu_sensor, (void*)&interval) != 0) {
         perror("pthread_create failed");
         return 1;
     }
 
     pthread_t tid_proc_sensor;
-    if(pthread_create(&tid_proc_sensor, NULL, proc_sensor, (void*)interval) != 0) {
+    if(pthread_create(&tid_proc_sensor, NULL, proc_sensor, (void*)&interval) != 0) {
         perror("pthread_create failed");
-        return 1;
-    }
-
-    struct sigaction sa;
-    sa.sa_handler = &handle_sigchld;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
-    sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
-    if (sigaction(SIGCHLD, &sa, NULL) == -1) {
-        perror("sigaction failed");
         return 1;
     }
 
@@ -196,7 +187,7 @@ int main(int argc, char *argv[]) {
         printf("Load Average (1 min): %.2f\n", state->load1);
         printf("Load Average (5 min): %.2f\n", state->load5);
         printf("Load Average (15 min): %.2f\n", state->load15);
-        printf("Total number of processes: %zu\n", state->total_procs);
+        printf("Total number of processes: %d\n", state->total_procs);
         pthread_mutex_unlock(&state->lock);
 
         usleep(interval);
