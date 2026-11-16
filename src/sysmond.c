@@ -63,16 +63,14 @@ void *cpu_sensor(void *arg) {
             state->load1 = loadavg1;
             state->load5 = loadavg5;
             state->load15 = loadavg15;
+            if(loadavg1 > 1.5){
+                pthread_cond_signal(&state->alert_cond);
+            }
             pthread_mutex_unlock(&state->lock);
         } else {
             perror("Error reading load averages");
         }
 
-        if(loadavg1 > 1.5){
-            pthread_mutex_lock(&state->lock);
-            pthread_cond_signal(&state->alert_cond);
-            pthread_mutex_unlock(&state->lock);
-        }
 
         fclose(file);
 
@@ -133,8 +131,6 @@ int main(int argc, char *argv[]) {
         interval = atof(argv[1]) * 1000000;
     }
 
-    mkdir("/tmp/sysmon", 0777);
-    
     state = malloc(sizeof(SystemState));
     if(state == NULL) {
         perror("Error allocating memory for SystemState");
@@ -172,11 +168,11 @@ int main(int argc, char *argv[]) {
         system("clear");
 
         pthread_mutex_lock(&state->lock);
-        printf("MemTotal:        %zu kB\n", state->mem_total);
-        printf("MemFree:         %zu kB\n", state->mem_free);
-        printf("MemAvailable:    %zu kB\n", state->mem_avail);
-        printf("SwapTotal:       %zu kB\n", state->swap_total);
-        printf("SwapFree:        %zu kB\n", state->swap_free);
+        printf("MemTotal:        %ld kB\n", state->mem_total);
+        printf("MemFree:         %ld kB\n", state->mem_free);
+        printf("MemAvailable:    %ld kB\n", state->mem_avail);
+        printf("SwapTotal:       %ld kB\n", state->swap_total);
+        printf("SwapFree:        %ld kB\n", state->swap_free);
         printf("Load Average (1 min): %.2f\n", state->load1);
         printf("Load Average (5 min): %.2f\n", state->load5);
         printf("Load Average (15 min): %.2f\n", state->load15);
@@ -190,5 +186,11 @@ int main(int argc, char *argv[]) {
     pthread_join(tid_cpu_sensor, NULL);
     pthread_join(tid_proc_sensor, NULL);
     pthread_join(alert_thread, NULL);
+
+    pthread_mutex_destroy(&state->lock);
+    pthread_cond_destroy(&state->alert_cond);
+
+    free(state);
+
     return 0;
 }
