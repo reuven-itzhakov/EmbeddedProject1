@@ -1,10 +1,20 @@
 #include "sysmond.h"
 
 SystemState* state = NULL;
+volatile sig_atomic_t running = 1;
+
+void sig_handler(int signum) {
+    if(signum == SIGINT) {
+        running = 0;
+        pthread_mutex_lock(&state->lock);
+        pthread_cond_signal(&state->alert_cond);
+        pthread_mutex_unlock(&state->lock);
+    }
+}
 
 void *mem_sensor(void *arg) {
     useconds_t interval = *(useconds_t*)arg;
-    while(1) {
+    while(running) {
         FILE *file = fopen("/proc/meminfo", "r");
         if(file == NULL) {
             perror("Error opening /proc/meminfo");
@@ -49,7 +59,7 @@ void *mem_sensor(void *arg) {
 
 void *cpu_sensor(void *arg) {
     useconds_t interval = *(useconds_t*)arg;
-    while(1) {
+    while(running) {
         double loadavg1, loadavg5, loadavg15;
     
         FILE *file = fopen("/proc/loadavg", "r");
@@ -81,7 +91,7 @@ void *cpu_sensor(void *arg) {
 
 void *proc_sensor(void *arg) {
     useconds_t interval = *(useconds_t*)arg;
-    while(1){
+    while(running){
         DIR *dir = opendir("/proc");
         if (dir == NULL) {
             perror("Error opening /proc");
@@ -109,9 +119,13 @@ void *proc_sensor(void *arg) {
 }
 
 void *alert_handler(void *arg) {
-    while(1) {
+    while(running) {
         pthread_mutex_lock(&state->lock);
         pthread_cond_wait(&state->alert_cond, &state->lock);
+        if(!running) {
+            pthread_mutex_unlock(&state->lock);
+            break;
+        }
         fprintf(stderr, "ALERT: CPU load average over 1 minute is above 1.5!\n");
         pthread_mutex_unlock(&state->lock);
     }
@@ -129,6 +143,15 @@ int main(int argc, char *argv[]) {
     useconds_t interval = 1000000;
     if(argc > 1){
         interval = atof(argv[1]) * 1000000;
+    }
+
+    struct sigaction sa;
+    sa.sa_handler = sig_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    if(sigaction(SIGINT, &sa, NULL) == -1) {
+        perror("Error setting up signal handler");
+        return 1;
     }
 
     state = malloc(sizeof(SystemState));
@@ -164,7 +187,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    while(1) {
+    while(running) {
         system("clear");
 
         pthread_mutex_lock(&state->lock);
@@ -182,6 +205,8 @@ int main(int argc, char *argv[]) {
         usleep(interval);
     }
 
+    printf("Shutting down...\n");
+
     pthread_join(tid_mem_sensor, NULL);
     pthread_join(tid_cpu_sensor, NULL);
     pthread_join(tid_proc_sensor, NULL);
@@ -191,6 +216,8 @@ int main(int argc, char *argv[]) {
     pthread_cond_destroy(&state->alert_cond);
 
     free(state);
+
+    printf("Shutdown complete.\n");
 
     return 0;
 }
