@@ -5,18 +5,13 @@
 #include <unistd.h>
 #include <string.h>
 #include <sys/stat.h>
+#include "sysmon_ipc.h"
 
 int main(int argc, char *argv[]) {
     if(argc > 1 && strcmp(argv[1], "--help") == 0) {
-        printf("Usage: %s [interval]\n", argv[0]);
-        printf("interval: Time in seconds between updates (default is 1 second)\n");
+        printf("Usage: %s\n", argv[0]);
         printf("This program reads data from process sensor and displays it.\n");
         return 0;
-    }
-    
-    useconds_t interval = 1000000;
-    if(argc > 1){
-        interval = atof(argv[1]) * 1000000;
     }
     
     mkdir("/tmp/sysmon", 0777);
@@ -49,7 +44,7 @@ int main(int argc, char *argv[]) {
         fclose(file_tmp);
         closedir(dir);
 
-        usleep(interval);
+        sleep(INTERVAL);
     }
     
     return 0;

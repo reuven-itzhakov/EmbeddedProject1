@@ -1,8 +1,8 @@
-CFLAG = -Wall -g
 CC = gcc
 BIN_DIR = bin
-INC_DIR = include
+INC_DIR = inc
 SRC_DIR = src
+CFLAG = -Wall -g -I$(INC_DIR)
 
 $(BIN_DIR)/%: $(SRC_DIR)/%.c
 	$(CC) $(CFLAG) $< -o $@

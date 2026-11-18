@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <sys/wait.h>
+#include "sysmon_ipc.h"
 
 sig_atomic_t child_exited = 0;
 sig_atomic_t child_pid = 0;
@@ -23,28 +24,19 @@ void handle_sigchld(int sig) {
 
 int main(int argc, char *argv[]) {
     if(argc > 1 && strcmp(argv[1], "--help") == 0) {
-        printf("Usage: %s [interval]\n", argv[0]);
-        printf("interval: Time in seconds between updates (default is 1 second)\n");
+        printf("Usage: %s\n", argv[0]);
         printf("This program reads data from memory, CPU, and process sensors and displays it.\n");
         return 0;
     }
 
-    useconds_t interval = 1000000;
-    if(argc > 1){
-        interval = atof(argv[1]) * 1000000;
-    }
-
     mkdir("/tmp/sysmon", 0777);
     
-    char interval_str[32];
-    snprintf(interval_str, sizeof(interval_str), "%.2f", (double)interval / 1000000.0);
-
     pid_t pid_mem_sensor = fork();
     if(pid_mem_sensor < 0) {
         perror("Fork failed");
         return 1;
     } else if(pid_mem_sensor == 0) {
-        execl("./bin/mem_sensor", "./bin/mem_sensor", interval_str, NULL);
+        execl("./bin/mem_sensor", "./bin/mem_sensor", NULL);
         perror("Failed to start mem_sensor");
         return 1;
     }
@@ -54,7 +46,7 @@ int main(int argc, char *argv[]) {
         perror("Fork failed");
         return 1;
     } else if(pid_cpu_sensor == 0) {
-        execl("./bin/cpu_sensor", "./bin/cpu_sensor", interval_str, NULL);
+        execl("./bin/cpu_sensor", "./bin/cpu_sensor", NULL);
         perror("Failed to start cpu_sensor");
         return 1;
     }
@@ -64,7 +56,7 @@ int main(int argc, char *argv[]) {
         perror("Fork failed");
         return 1;
     } else if(pid_proc_sensor == 0) {
-        execl("./bin/proc_sensor", "./bin/proc_sensor", interval_str, NULL);
+        execl("./bin/proc_sensor", "./bin/proc_sensor", NULL);
         perror("Failed to start proc_sensor");
         return 1;
     }
@@ -131,7 +123,7 @@ int main(int argc, char *argv[]) {
             child_exited = 0;
         }
 
-        usleep(interval);
+        sleep(INTERVAL);
     }
 
     return 0;
