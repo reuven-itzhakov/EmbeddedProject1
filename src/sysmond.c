@@ -29,15 +29,21 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
+
+    int fd[2];
+    pipe(fd);
+    
     pid_t pid_mem_sensor = fork();
     if(pid_mem_sensor < 0) {
         perror("Fork failed");
         return 1;
     } else if(pid_mem_sensor == 0) {
-        execl("./bin/mem_sensor", "./bin/mem_sensor", NULL);
+        close(fd[0]);
+        execle("./bin/mem_sensor", "./bin/mem_sensor", fd[1], NULL);
         perror("Failed to start mem_sensor");
         return 1;
     }
+    close(fd[1]);
 
     pid_t pid_cpu_sensor = fork();
     if(pid_cpu_sensor < 0) {
@@ -69,35 +75,40 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+
     while(1) {
         system("clear");
-        FILE *mem_file = fopen("/tmp/sysmon/mem.dat", "r");
-        if(mem_file == NULL) {
-            perror("Error opening /tmp/sysmon/mem.dat");
+        FILE* fifo = fdopen(fd[0], "r");
+        if(fifo == NULL) {
+            perror("Error opening FIFO");
             return 1;
         }
         
         FILE *cpu_file = fopen("/tmp/sysmon/cpu.dat", "r");
         if(cpu_file == NULL) {
             perror("Error opening /tmp/sysmon/cpu.dat");
-            fclose(mem_file);
+            fclose(fifo);
             return 1;
         }
         
         FILE *proc_file = fopen("/tmp/sysmon/proc.dat", "r");
         if(proc_file == NULL) {
             perror("Error opening /tmp/sysmon/proc.dat");
-            fclose(mem_file);
+            fclose(fifo);
             fclose(cpu_file);
             return 1;
         }
 
-        char mem_buffer[256];
+        MemData mem_data;
         char cpu_buffer[256];
         char proc_buffer[256];
 
-        while(fgets(mem_buffer, sizeof(mem_buffer), mem_file) != NULL) {
-            printf("%s", mem_buffer);
+        if(fread(&mem_data, sizeof(MemData), 1, fifo) != NULL) {
+            printf("MemTotal: %ld KB\n", mem_data.mem_total);
+            printf("MemFree: %ld KB\n", mem_data.mem_free);
+            printf("MemAvailable: %ld KB\n", mem_data.mem_avail);
+            printf("SwapTotal: %ld KB\n", mem_data.swap_total);
+            printf("SwapFree: %ld KB\n", mem_data.swap_free);
         }
         
         while(fgets(cpu_buffer, sizeof(cpu_buffer), cpu_file) != NULL) {
@@ -108,7 +119,7 @@ int main(int argc, char *argv[]) {
             printf("%s", proc_buffer);
         }
 
-        fclose(mem_file);
+        fclose(fifo);
         fclose(cpu_file);
         fclose(proc_file);
 
@@ -123,6 +134,8 @@ int main(int argc, char *argv[]) {
 
         sleep(INTERVAL);
     }
+
+    close(fd[0]);
 
     return 0;
 }

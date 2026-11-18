@@ -13,11 +13,12 @@ int main(int argc, char *argv[]) {
     }
     
     MemData mem_data;
+    int fd = argc > 1 && atoi(argv[1]) != 0 ? atoi(argv[1]) : STDOUT_FILENO;
 
     while(1) {
 
         FILE* fifo;
-        fifo = fdopen(argc > 1 && atoi(argv[1]) != 0 ? atoi(argv[1]) : STDOUT_FILENO, "w");
+        fifo = fdopen(fd, "w");
         if(fifo == NULL){
             perror("Error opening FIFO");
             return 1;
@@ -33,22 +34,23 @@ int main(int argc, char *argv[]) {
         char buffer[256];
         while(fgets(buffer, sizeof(buffer), file) != NULL) {
             if(strncmp(buffer, "MemTotal:", 9) == 0){
-                mem_data.mem_total = atol(buffer + 9);
+                mem_data.mem_total = strtol(buffer + 9, NULL, 10);
             }
             if(strncmp(buffer, "MemFree:", 8) == 0){
-                mem_data.mem_free = atol(buffer + 8);
+                mem_data.mem_free = strtol(buffer + 8, NULL, 10);
             }
             if(strncmp(buffer, "MemAvailable:", 13) == 0){
-                mem_data.mem_avail = atol(buffer + 13);
+                mem_data.mem_avail = strtol(buffer + 13, NULL, 10);
             }
             if(strncmp(buffer, "SwapTotal:", 10) == 0){
-                mem_data.swap_total = atol(buffer + 10);
+                mem_data.swap_total = strtol(buffer + 10, NULL, 10);
             }
             if(strncmp(buffer, "SwapFree:", 9) == 0) {
-                mem_data.swap_free = atol(buffer + 9);
+                mem_data.swap_free = strtol(buffer + 9, NULL, 10);
             }
-
         }
+
+        fwrite(&mem_data, sizeof(MemData), 1, fifo);
 
         fclose(file);
         fclose(fifo);
