@@ -14,15 +14,15 @@ int main(int argc, char *argv[]) {
     
     MemData mem_data;
     int fd = argc > 1 && atoi(argv[1]) != 0 ? atoi(argv[1]) : STDOUT_FILENO;
+    
+    FILE* fifo;
+    fifo = fdopen(fd, "w");
+    if(fifo == NULL){
+        perror("Error opening FIFO");
+        return 1;
+    }
 
     while(1) {
-
-        FILE* fifo;
-        fifo = fdopen(fd, "w");
-        if(fifo == NULL){
-            perror("Error opening FIFO");
-            return 1;
-        }
 
         FILE *file = fopen("/proc/meminfo", "r");
         if(file == NULL) {
@@ -53,10 +53,11 @@ int main(int argc, char *argv[]) {
         fwrite(&mem_data, sizeof(MemData), 1, fifo);
 
         fclose(file);
-        fclose(fifo);
-
+        
         sleep(INTERVAL);
     }
+    
+    fclose(fifo);
     
     return 0;
 }

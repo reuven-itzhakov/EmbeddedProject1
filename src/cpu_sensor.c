@@ -4,6 +4,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include "sysmon_ipc.h"
+#include <fcntl.h>
 
 int main(int argc, char *argv[]) {
     if(argc > 1 && strcmp(argv[1], "--help") == 0) {
@@ -12,34 +13,39 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
-    mkdir("/tmp/sysmon", 0777);
+    // /tmp/sysmon_cpu.fifo
     
     while(1) {
         double loadavg1, loadavg5, loadavg15;
-    
+        CpuData  cpu_data;
+
+        int fd = open("/tmp/sysmon_cpu.fifo", O_WRONLY);
+        if(fd == -1) {
+            perror("Error opening /tmp/sysmon_cpu.fifo");
+            return 1;
+        }
+
         FILE *file = fopen("/proc/loadavg", "r");
         if(file == NULL) {
             perror("Error opening /proc/loadavg");
+            close(fd);
             return 1;
         }
         
-        FILE *file_tmp = fopen("/tmp/sysmon/cpu.dat", "w");
-        if(file_tmp == NULL) {
-            perror("Error opening /tmp/sysmon/cpu.dat");
-            fclose(file);
-            return 1;
+        if(fscanf(file, "%lf %lf %lf", &loadavg1, &loadavg5, &loadavg15) == 3) {
+            cpu_data.load1 = loadavg1;
+            cpu_data.load5 = loadavg5;
+            cpu_data.load15 = loadavg15;
+        } else {
+            write(fd, "Error reading load averages\n", strlen("Error reading load averages\n"));
         }
 
-        if(fscanf(file, "%lf %lf %lf", &loadavg1, &loadavg5, &loadavg15) == 3) {
-            fprintf(file_tmp, "Load Average (1 min): %.2f\n", loadavg1);
-            fprintf(file_tmp, "Load Average (5 min): %.2f\n", loadavg5);
-            fprintf(file_tmp, "Load Average (15 min): %.2f\n", loadavg15);
-        } else {
-            fprintf(file_tmp, "Error reading load averages\n");
+        if(write(fd, &cpu_data, sizeof(CpuData)) == -1) {
+            perror("Error writing to /tmp/sysmon_cpu.fifo");
         }
 
         fclose(file);
-        fclose(file_tmp);
+        close(fd);
 
         sleep(INTERVAL);
     }
