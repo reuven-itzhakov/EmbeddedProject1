@@ -11,36 +11,47 @@ int main(int argc, char *argv[]) {
         printf("This program reads data from memory sensor and displays it.\n");
         return 0;
     }
-
-    mkdir("/tmp/sysmon", 0777);
+    
+    MemData mem_data;
 
     while(1) {
+
+        FILE* fifo;
+        fifo = fdopen(argc > 1 && atoi(argv[1]) != 0 ? atoi(argv[1]) : STDOUT_FILENO, "w");
+        if(fifo == NULL){
+            perror("Error opening FIFO");
+            return 1;
+        }
+
         FILE *file = fopen("/proc/meminfo", "r");
         if(file == NULL) {
             perror("Error opening /proc/meminfo");
+            fclose(fifo);
             return 1;
         }
         
-        FILE *file_tmp = fopen("/tmp/sysmon/mem.dat", "w");
-        if(file_tmp == NULL) {
-            perror("Error opening /tmp/sysmon/mem.dat");
-            fclose(file);
-            return 1;
-        }
-
         char buffer[256];
         while(fgets(buffer, sizeof(buffer), file) != NULL) {
-            if(strncmp(buffer, "MemTotal:",      9) == 0
-            || strncmp(buffer, "MemFree:",       8) == 0
-            || strncmp(buffer, "MemAvailable:", 13) == 0
-            || strncmp(buffer, "SwapTotal:",    10) == 0
-            || strncmp(buffer, "SwapFree:",      9) == 0) {
-                fprintf(file_tmp, "%s", buffer);
+            if(strncmp(buffer, "MemTotal:", 9) == 0){
+                mem_data.mem_total = atol(buffer + 9);
             }
+            if(strncmp(buffer, "MemFree:", 8) == 0){
+                mem_data.mem_free = atol(buffer + 8);
+            }
+            if(strncmp(buffer, "MemAvailable:", 13) == 0){
+                mem_data.mem_avail = atol(buffer + 13);
+            }
+            if(strncmp(buffer, "SwapTotal:", 10) == 0){
+                mem_data.swap_total = atol(buffer + 10);
+            }
+            if(strncmp(buffer, "SwapFree:", 9) == 0) {
+                mem_data.swap_free = atol(buffer + 9);
+            }
+
         }
 
         fclose(file);
-        fclose(file_tmp);
+        fclose(fifo);
 
         sleep(INTERVAL);
     }

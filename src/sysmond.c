@@ -29,8 +29,6 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
-    mkdir("/tmp/sysmon", 0777);
-    
     pid_t pid_mem_sensor = fork();
     if(pid_mem_sensor < 0) {
         perror("Fork failed");
