@@ -1,9 +1,11 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <sys/stat.h>
 #include "sysmon_ipc.h"
+
+FILE* fifo;
+
+void handler(int sig) {
+    fclose(fifo);
+    exit(0);
+}
 
 int main(int argc, char *argv[]) {
     if(argc > 1 && strcmp(argv[1], "--help") == 0) {
@@ -15,15 +17,22 @@ int main(int argc, char *argv[]) {
     MemData mem_data;
     int fd = argc > 1 && atoi(argv[1]) != 0 ? atoi(argv[1]) : STDOUT_FILENO;
     
-    FILE* fifo;
     fifo = fdopen(fd, "w");
     if(fifo == NULL){
         perror("Error opening FIFO");
         return 1;
     }
 
+    struct sigaction sa;
+    sa.sa_handler = &handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    if(sigaction(SIGTERM, &sa, NULL) == -1) {
+        perror("Error setting signal handler");
+        return 1;
+    }
+    
     while(1) {
-
         FILE *file = fopen("/proc/meminfo", "r");
         if(file == NULL) {
             perror("Error opening /proc/meminfo");
@@ -51,13 +60,11 @@ int main(int argc, char *argv[]) {
         }
 
         fwrite(&mem_data, sizeof(MemData), 1, fifo);
-
+        fflush(fifo);
         fclose(file);
-        
+
         sleep(INTERVAL);
     }
-    
-    fclose(fifo);
     
     return 0;
 }

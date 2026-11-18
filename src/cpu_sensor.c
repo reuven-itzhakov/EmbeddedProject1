@@ -1,10 +1,12 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <string.h>
-#include <sys/stat.h>
 #include "sysmon_ipc.h"
-#include <fcntl.h>
+
+volatile int fd;
+
+void handler(int sig) {
+    close(fd);
+    unlink(CPU_FIFO_PATH);
+    exit(0);
+}
 
 int main(int argc, char *argv[]) {
     if(argc > 1 && strcmp(argv[1], "--help") == 0) {
@@ -13,25 +15,36 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
-    // /tmp/sysmon_cpu.fifo
+    if(mkfifo(CPU_FIFO_PATH, 0666) == -1 && errno != EEXIST) {
+        perror("Error creating CPU_FIFO_PATH");
+        return 1;
+    }
+
+    fd = open(CPU_FIFO_PATH, O_WRONLY);
+    if(fd == -1) {
+        perror("Error opening CPU_FIFO_PATH");
+        return 1;
+    }
+    
+    struct sigaction sa;
+    sa.sa_handler = &handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    if(sigaction(SIGTERM, &sa, NULL) == -1) {
+        perror("Error setting signal handler");
+        return 1;
+    }
     
     while(1) {
-        double loadavg1, loadavg5, loadavg15;
-        CpuData  cpu_data;
-
-        int fd = open("/tmp/sysmon_cpu.fifo", O_WRONLY);
-        if(fd == -1) {
-            perror("Error opening /tmp/sysmon_cpu.fifo");
-            return 1;
-        }
-
         FILE *file = fopen("/proc/loadavg", "r");
         if(file == NULL) {
             perror("Error opening /proc/loadavg");
             close(fd);
             return 1;
         }
-        
+        double loadavg1, loadavg5, loadavg15;
+        CpuData  cpu_data;
+
         if(fscanf(file, "%lf %lf %lf", &loadavg1, &loadavg5, &loadavg15) == 3) {
             cpu_data.load1 = loadavg1;
             cpu_data.load5 = loadavg5;
@@ -41,12 +54,11 @@ int main(int argc, char *argv[]) {
         }
 
         if(write(fd, &cpu_data, sizeof(CpuData)) == -1) {
-            perror("Error writing to /tmp/sysmon_cpu.fifo");
+            perror("Error writing to CPU_FIFO_PATH");
+            return 1;
         }
-
+        
         fclose(file);
-        close(fd);
-
         sleep(INTERVAL);
     }
 

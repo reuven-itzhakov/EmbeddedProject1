@@ -1,25 +1,22 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/stat.h>
-#include <string.h>
-#include <unistd.h>
-#include <signal.h>
-#include <sys/wait.h>
 #include "sysmon_ipc.h"
 
-sig_atomic_t child_exited = 0;
-sig_atomic_t child_pid = 0;
-sig_atomic_t child_status = 0;
+volatile pid_t pid_mem_sensor;
+volatile pid_t pid_cpu_sensor;
+volatile pid_t pid_proc_sensor;
 
-void handle_sigchld(int sig) {
-    int status;
-    pid_t pid;
+void handler(int sig) {
+    if (pid_mem_sensor  > 0) kill(pid_mem_sensor,  SIGTERM);
+    if (pid_cpu_sensor  > 0) kill(pid_cpu_sensor,  SIGTERM);
+    if (pid_proc_sensor > 0) kill(pid_proc_sensor, SIGTERM);
     
-    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
-        child_exited = 1;
-        child_pid = pid;
-        child_status = status;
-    }
+    waitpid(pid_mem_sensor, NULL, 0);
+    waitpid(pid_cpu_sensor, NULL, 0);
+    waitpid(pid_proc_sensor, NULL, 0);
+
+    unlink(PROC_FIFO_PATH);
+    unlink(CPU_FIFO_PATH);
+
+    exit(0);
 }
 
 int main(int argc, char *argv[]) {
@@ -29,23 +26,27 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
-
     int fd[2];
-    pipe(fd);
+    if(pipe(fd) == -1){
+        perror("pipe failed");
+        return 1;
+    }
     
-    pid_t pid_mem_sensor = fork();
+    pid_mem_sensor = fork();
     if(pid_mem_sensor < 0) {
         perror("Fork failed");
         return 1;
     } else if(pid_mem_sensor == 0) {
         close(fd[0]);
-        execle("./bin/mem_sensor", "./bin/mem_sensor", fd[1], NULL);
+        char *fd_str = malloc(12);
+        sprintf(fd_str, "%d", fd[1]);
+        execl("./bin/mem_sensor", "./bin/mem_sensor", fd_str, NULL);
         perror("Failed to start mem_sensor");
         return 1;
     }
     close(fd[1]);
-
-    pid_t pid_cpu_sensor = fork();
+    
+    pid_cpu_sensor = fork();
     if(pid_cpu_sensor < 0) {
         perror("Fork failed");
         return 1;
@@ -55,7 +56,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    pid_t pid_proc_sensor = fork();
+    pid_proc_sensor = fork();
     if(pid_proc_sensor < 0) {
         perror("Fork failed");
         return 1;
@@ -65,45 +66,47 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    struct sigaction sa;
-    sa.sa_handler = &handle_sigchld;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
-    sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
-    if (sigaction(SIGCHLD, &sa, NULL) == -1) {
-        perror("sigaction failed");
+    usleep(100000); // Sleep for 100 milliseconds to allow sensors to initialize
+
+    int fd_cpu = open(CPU_FIFO_PATH, O_RDONLY | O_NONBLOCK);
+    if(fd_cpu == -1) {
+        perror("Error opening CPU_FIFO_PATH");
         return 1;
     }
 
+    int fd_proc = open(PROC_FIFO_PATH, O_RDONLY | O_NONBLOCK);
+    if(fd_proc == -1) {
+        perror("Error opening PROC_FIFO_PATH");
+        return 1;
+    }
+
+    struct sigaction sa;
+    sa.sa_handler = &handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    if(sigaction(SIGTERM, &sa, NULL) == -1) {
+        perror("sigaction failed");
+        return 1;
+    }
+    if(sigaction(SIGINT, &sa, NULL) == -1) {
+        perror("sigaction failed");
+        return 1;
+    }
+    
+    FILE* fifo = fdopen(fd[0], "r");
+    if(fifo == NULL) {
+        perror("Error opening FIFO");
+        return 1;
+    }
 
     while(1) {
         system("clear");
-        FILE* fifo = fdopen(fd[0], "r");
-        if(fifo == NULL) {
-            perror("Error opening FIFO");
-            return 1;
-        }
         
-        FILE *cpu_file = fopen("/tmp/sysmon/cpu.dat", "r");
-        if(cpu_file == NULL) {
-            perror("Error opening /tmp/sysmon/cpu.dat");
-            fclose(fifo);
-            return 1;
-        }
-        
-        FILE *proc_file = fopen("/tmp/sysmon/proc.dat", "r");
-        if(proc_file == NULL) {
-            perror("Error opening /tmp/sysmon/proc.dat");
-            fclose(fifo);
-            fclose(cpu_file);
-            return 1;
-        }
-
         MemData mem_data;
-        char cpu_buffer[256];
-        char proc_buffer[256];
+        CpuData cpu_data;
+        ProcData proc_data;
 
-        if(fread(&mem_data, sizeof(MemData), 1, fifo) != NULL) {
+        if(fread(&mem_data, sizeof(MemData), 1, fifo) > 0) {
             printf("MemTotal: %ld KB\n", mem_data.mem_total);
             printf("MemFree: %ld KB\n", mem_data.mem_free);
             printf("MemAvailable: %ld KB\n", mem_data.mem_avail);
@@ -111,30 +114,21 @@ int main(int argc, char *argv[]) {
             printf("SwapFree: %ld KB\n", mem_data.swap_free);
         }
         
-        while(fgets(cpu_buffer, sizeof(cpu_buffer), cpu_file) != NULL) {
-            printf("%s", cpu_buffer);
+        if(read(fd_cpu, &cpu_data, sizeof(CpuData)) > 0) {
+            printf("Load 1: %.2f\n", cpu_data.load1);
+            printf("Load 5: %.2f\n", cpu_data.load5);
+            printf("Load 15: %.2f\n", cpu_data.load15);
         }
         
-        while(fgets(proc_buffer, sizeof(proc_buffer), proc_file) != NULL) {
-            printf("%s", proc_buffer);
+        if(read(fd_proc, &proc_data, sizeof(ProcData)) > 0) {
+            printf("Process: %d\n", proc_data.total_procs);
         }
 
-        fclose(fifo);
-        fclose(cpu_file);
-        fclose(proc_file);
-
-        if (child_exited) {
-            if (WIFEXITED(child_status)) {
-                printf("\nChild process (PID: %d) exited normally with status %d\n", child_pid, WEXITSTATUS(child_status));
-            } else if (WIFSIGNALED(child_status)) {
-                printf("\nChild process (PID: %d) was killed by signal %d\n", child_pid, WTERMSIG(child_status));
-            }
-            child_exited = 0;
-        }
-
+        
         sleep(INTERVAL);
     }
-
+    
+    fclose(fifo);
     close(fd[0]);
 
     return 0;
