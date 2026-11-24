@@ -13,6 +13,13 @@ int main(int argc, char *argv[]) {
         printf("This program reads data from memory sensor and displays it.\n");
         return 0;
     }
+
+    int interval;
+    if(argc > 1 && atoi(argv[1]) != 0) {
+        interval = atoi(argv[1]);
+    } else {
+        interval = INTERVAL;
+    }
     
     MemData mem_data;
     int fd = argc > 1 && atoi(argv[1]) != 0 ? atoi(argv[1]) : STDOUT_FILENO;
@@ -63,7 +70,7 @@ int main(int argc, char *argv[]) {
         fflush(fifo);
         fclose(file);
 
-        sleep(INTERVAL);
+        sleep(interval);
     }
     
     return 0;

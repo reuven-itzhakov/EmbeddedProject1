@@ -14,6 +14,13 @@ int main(int argc, char *argv[]) {
         printf("This program reads data from process sensor and displays it.\n");
         return 0;
     }
+
+    int interval;
+    if(argc > 1 && atoi(argv[1]) != 0) {
+        interval = atoi(argv[1]);
+    } else {
+        interval = INTERVAL;
+    }
     
     if(mkfifo(PROC_FIFO_PATH, 0666) == -1 && errno != EEXIST) {
         perror("Error creating PROC_FIFO_PATH");
@@ -62,7 +69,7 @@ int main(int argc, char *argv[]) {
     
         closedir(dir);
 
-        sleep(INTERVAL);
+        sleep(interval);
     }
         
     return 0;

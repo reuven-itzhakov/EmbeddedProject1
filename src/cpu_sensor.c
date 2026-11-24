@@ -15,6 +15,13 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
+    int interval;
+    if(argc > 1 && atoi(argv[1]) != 0) {
+        interval = atoi(argv[1]);
+    } else {
+        interval = INTERVAL;
+    }
+
     if(mkfifo(CPU_FIFO_PATH, 0666) == -1 && errno != EEXIST) {
         perror("Error creating CPU_FIFO_PATH");
         return 1;
@@ -59,7 +66,7 @@ int main(int argc, char *argv[]) {
         }
         
         fclose(file);
-        sleep(INTERVAL);
+        sleep(interval);
     }
 
     return 0;

@@ -21,9 +21,26 @@ void handler(int sig) {
 
 int main(int argc, char *argv[]) {
     if(argc > 1 && strcmp(argv[1], "--help") == 0) {
-        printf("Usage: %s\n", argv[0]);
+        printf("Usage: %s <sysmon_interval> <mem_interval> <cpu_interval> <proc_interval>\n", argv[0]);
         printf("This program reads data from memory, CPU, and process sensors and displays it.\n");
+        printf("The sensors gets interval values in seconds from the command line arguments, if not provided, default values are used (1).\n");
         return 0;
+    }
+
+    char* interval_str[4];
+    for(int i = 0; i < 4; i++) {
+        if(argc > i + 1) {
+            interval_str[i] = argv[i + 1];
+        } else {
+            interval_str[i] = "1";
+        }
+    }
+
+    int interval;
+    if(argc > 1 && atoi(argv[1]) != 0) {
+        interval = atoi(argv[1]);
+    } else {
+        interval = INTERVAL;
     }
 
     int fd[2];
@@ -40,7 +57,7 @@ int main(int argc, char *argv[]) {
         close(fd[0]);
         char *fd_str = malloc(12);
         sprintf(fd_str, "%d", fd[1]);
-        execl("./bin/mem_sensor", "./bin/mem_sensor", fd_str, NULL);
+        execl("./bin/mem_sensor", "./bin/mem_sensor", fd_str, interval_str[1], NULL);
         perror("Failed to start mem_sensor");
         return 1;
     }
@@ -51,7 +68,7 @@ int main(int argc, char *argv[]) {
         perror("Fork failed");
         return 1;
     } else if(pid_cpu_sensor == 0) {
-        execl("./bin/cpu_sensor", "./bin/cpu_sensor", NULL);
+        execl("./bin/cpu_sensor", "./bin/cpu_sensor", interval_str[2], NULL);
         perror("Failed to start cpu_sensor");
         return 1;
     }
@@ -61,7 +78,7 @@ int main(int argc, char *argv[]) {
         perror("Fork failed");
         return 1;
     } else if(pid_proc_sensor == 0) {
-        execl("./bin/proc_sensor", "./bin/proc_sensor", NULL);
+        execl("./bin/proc_sensor", "./bin/proc_sensor", interval_str[3], NULL);
         perror("Failed to start proc_sensor");
         return 1;
     }
@@ -98,6 +115,9 @@ int main(int argc, char *argv[]) {
         perror("Error opening FIFO");
         return 1;
     }
+    int fdFifo = fileno(fifo);
+    int flags = fcntl(fdFifo, F_GETFL, 0);
+    fcntl(fdFifo, F_SETFL, flags | O_NONBLOCK);
 
     while(1) {
         system("clear");
@@ -106,26 +126,22 @@ int main(int argc, char *argv[]) {
         CpuData cpu_data;
         ProcData proc_data;
 
-        if(fread(&mem_data, sizeof(MemData), 1, fifo) > 0) {
-            printf("MemTotal: %ld KB\n", mem_data.mem_total);
-            printf("MemFree: %ld KB\n", mem_data.mem_free);
-            printf("MemAvailable: %ld KB\n", mem_data.mem_avail);
-            printf("SwapTotal: %ld KB\n", mem_data.swap_total);
-            printf("SwapFree: %ld KB\n", mem_data.swap_free);
-        }
+        fread(&mem_data, sizeof(MemData), 1, fifo);
+        printf("MemTotal: %ld KB\n", mem_data.mem_total);
+        printf("MemFree: %ld KB\n", mem_data.mem_free);
+        printf("MemAvailable: %ld KB\n", mem_data.mem_avail);
+        printf("SwapTotal: %ld KB\n", mem_data.swap_total);
+        printf("SwapFree: %ld KB\n", mem_data.swap_free);
         
-        if(read(fd_cpu, &cpu_data, sizeof(CpuData)) > 0) {
-            printf("Load 1: %.2f\n", cpu_data.load1);
-            printf("Load 5: %.2f\n", cpu_data.load5);
-            printf("Load 15: %.2f\n", cpu_data.load15);
-        }
+        read(fd_cpu, &cpu_data, sizeof(CpuData));
+        printf("Load 1: %.2f\n", cpu_data.load1);
+        printf("Load 5: %.2f\n", cpu_data.load5);
+        printf("Load 15: %.2f\n", cpu_data.load15);
         
-        if(read(fd_proc, &proc_data, sizeof(ProcData)) > 0) {
-            printf("Process: %d\n", proc_data.total_procs);
-        }
-
+        read(fd_proc, &proc_data, sizeof(ProcData));
+        printf("Process: %d\n", proc_data.total_procs);
         
-        sleep(INTERVAL);
+        sleep(interval);
     }
     
     fclose(fifo);
