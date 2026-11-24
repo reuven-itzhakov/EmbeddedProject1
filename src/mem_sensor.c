@@ -15,8 +15,8 @@ int main(int argc, char *argv[]) {
     }
 
     int interval;
-    if(argc > 1 && atoi(argv[1]) != 0) {
-        interval = atoi(argv[1]);
+    if(argc > 2 && atoi(argv[2]) > 0) {
+        interval = atoi(argv[2]);
     } else {
         interval = INTERVAL;
     }
@@ -69,7 +69,6 @@ int main(int argc, char *argv[]) {
         fwrite(&mem_data, sizeof(MemData), 1, fifo);
         fflush(fifo);
         fclose(file);
-
         sleep(interval);
     }
     

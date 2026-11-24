@@ -1,9 +1,11 @@
 #include "sysmon_ipc.h"
 
-volatile int fd;
+volatile int fd = -1;
 
 void handler(int sig) {
-    close(fd);
+    if(fd >= 0) {
+        close(fd);
+    }
     unlink(CPU_FIFO_PATH);
     exit(0);
 }
@@ -16,7 +18,7 @@ int main(int argc, char *argv[]) {
     }
 
     int interval;
-    if(argc > 1 && atoi(argv[1]) != 0) {
+    if(argc > 1 && atoi(argv[1]) > 0) {
         interval = atoi(argv[1]);
     } else {
         interval = INTERVAL;
@@ -50,18 +52,18 @@ int main(int argc, char *argv[]) {
             return 1;
         }
         double loadavg1, loadavg5, loadavg15;
-        CpuData  cpu_data;
+        CpuData cpu_data = {0};
 
         if(fscanf(file, "%lf %lf %lf", &loadavg1, &loadavg5, &loadavg15) == 3) {
             cpu_data.load1 = loadavg1;
             cpu_data.load5 = loadavg5;
             cpu_data.load15 = loadavg15;
-        } else {
-            write(fd, "Error reading load averages\n", strlen("Error reading load averages\n"));
         }
 
         if(write(fd, &cpu_data, sizeof(CpuData)) == -1) {
             perror("Error writing to CPU_FIFO_PATH");
+            fclose(file);
+            close(fd);
             return 1;
         }
         

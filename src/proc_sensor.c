@@ -1,9 +1,11 @@
 #include "sysmon_ipc.h"
 
-volatile int fd;
+volatile int fd = -1;
 
 void handler(int sig) {
-    close(fd);
+    if(fd >= 0) {
+        close(fd);
+    }
     unlink(PROC_FIFO_PATH);
     exit(0);
 }
@@ -16,7 +18,7 @@ int main(int argc, char *argv[]) {
     }
 
     int interval;
-    if(argc > 1 && atoi(argv[1]) != 0) {
+    if(argc > 1 && atoi(argv[1]) > 0) {
         interval = atoi(argv[1]);
     } else {
         interval = INTERVAL;
@@ -26,7 +28,6 @@ int main(int argc, char *argv[]) {
         perror("Error creating PROC_FIFO_PATH");
         return 1;
     }
-
     
     fd = open(PROC_FIFO_PATH, O_WRONLY);
     if(fd == -1) {
@@ -47,11 +48,12 @@ int main(int argc, char *argv[]) {
         DIR *dir = opendir("/proc");
         if (dir == NULL) {
             perror("Error opening /proc");
+            close(fd);
             return 1;
         }
-        ProcData proc_data;
+        ProcData proc_data = {0};
 
-        size_t total = 0;
+        int total = 0;
         struct dirent *entry;
 
         while((entry = readdir(dir)) != NULL) {
@@ -64,6 +66,8 @@ int main(int argc, char *argv[]) {
         
         if(write(fd, &proc_data, sizeof(ProcData)) == -1) {
             perror("Error writing to PROC_FIFO_PATH");
+            closedir(dir);
+            close(fd);
             return 1;
         }
     
