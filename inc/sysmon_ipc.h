@@ -6,6 +6,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <signal.h>
+#include <pthread.h>
 #include <sys/wait.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -15,7 +16,10 @@
 
 #define CPU_FIFO_PATH  "/tmp/sysmon_cpu.fifo"
 #define PROC_FIFO_PATH "/tmp/sysmon_proc.fifo"
-#define INTERVAL 1
+
+#define MEM_INTERVAL   1
+#define CPU_INTERVAL   2
+#define PROC_INTERVAL  3
 
 typedef struct {
     long mem_total;

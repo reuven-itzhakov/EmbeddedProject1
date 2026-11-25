@@ -6,12 +6,24 @@ void handler(int sig) {
     running = 0;
 }
 
+static int parse_interval(const char *arg, int default_val) {
+    char *endptr = NULL;
+    errno = 0;
+    long val = strtol(arg, &endptr, 10);
+    if (errno != 0 || endptr == arg || *endptr != '\0' || val <= 0) {
+        return default_val;
+    }
+    return (int)val;
+}
+
 int main(int argc, char *argv[]) {
     if (argc > 1 && strcmp(argv[1], "--help") == 0) {
-        printf("Usage: %s\n", argv[0]);
+        printf("Usage: %s [interval_sec]\n", argv[0]);
         printf("This program reads data from process sensor and writes it to the process FIFO.\n");
         return 0;
     }
+
+    int interval = (argc > 1) ? parse_interval(argv[1], PROC_INTERVAL) : PROC_INTERVAL;
 
     struct sigaction sa;
     sa.sa_handler = handler;
@@ -66,7 +78,7 @@ int main(int argc, char *argv[]) {
             return 1;
         }
 
-        sleep(INTERVAL);
+        sleep((unsigned int)interval);
     }
 
     close(fd);

@@ -6,16 +6,34 @@ void handler(int sig) {
     running = 0;
 }
 
+static int parse_interval(const char *arg, int default_val) {
+    char *endptr = NULL;
+    errno = 0;
+    long val = strtol(arg, &endptr, 10);
+    if (errno != 0 || endptr == arg || *endptr != '\0' || val <= 0) {
+        return default_val;
+    }
+    return (int)val;
+}
+
 int main(int argc, char *argv[]) {
     if (argc > 1 && strcmp(argv[1], "--help") == 0) {
-        printf("Usage: %s [fd]\n", argv[0]);
+        printf("Usage: %s [fd] [interval_sec]\n", argv[0]);
         printf("This program reads data from memory sensor and writes it to a file descriptor.\n");
         return 0;
     }
-    int fd = argc > 1 && atoi(argv[1]) != 0 ? atoi(argv[1]) : STDOUT_FILENO;
+
+    int fd;
+    if (argc > 1 && atoi(argv[1]) > 0) {
+        fd = atoi(argv[1]);
+    } else {
+        _exit(1);
+    }
     
-    FILE* fifo = fdopen(fd, "w");
-    if(fifo == NULL){
+    int interval = (argc > 2) ? parse_interval(argv[2], MEM_INTERVAL) : MEM_INTERVAL;
+
+    FILE *fifo = fdopen(fd, "w");
+    if (fifo == NULL) {
         perror("Error opening FIFO");
         return 1;
     }
@@ -26,6 +44,7 @@ int main(int argc, char *argv[]) {
     sa.sa_flags = 0;
     if (sigaction(SIGTERM, &sa, NULL) == -1 || sigaction(SIGINT, &sa, NULL) == -1) {
         perror("Error setting signal handler");
+        fclose(fifo);
         return 1;
     }
 
@@ -54,15 +73,19 @@ int main(int argc, char *argv[]) {
         }
 
         fclose(file);
-        if(fwrite(&mem_data, sizeof(MemData), 1, fifo) != 1) {
+        if (fwrite(&mem_data, sizeof(MemData), 1, fifo) != 1) {
+            if (!running || errno == EINTR || errno == EPIPE) {
+                break;
+            }
             perror("Error writing memory data");
             fclose(fifo);
             return 1;
         }
         fflush(fifo);
 
-        sleep(INTERVAL);
+        sleep((unsigned int)interval);
     }
-    
+
+    fclose(fifo);
     return 0;
 }
