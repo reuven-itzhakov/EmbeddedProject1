@@ -1,3 +1,6 @@
+#ifndef SYSMON_IPC_H
+#define SYSMON_IPC_H
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -8,11 +11,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <dirent.h>
-#include <string.h>
 #include <errno.h>
-
-#ifndef SYSMON_IPC_H
-#define SYSMON_IPC_H
 
 #define CPU_FIFO_PATH  "/tmp/sysmon_cpu.fifo"
 #define PROC_FIFO_PATH "/tmp/sysmon_proc.fifo"
