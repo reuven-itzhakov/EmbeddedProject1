@@ -8,22 +8,24 @@ static int fd_pipe[2] = {-1, -1};
 static int fd_cpu = -1;
 static int fd_proc = -1;
 
+volatile sig_atomic_t running = 1;
+
 static void cleanup_children_and_fifos(void) {
     if (pid_mem_sensor > 0) kill(pid_mem_sensor, SIGTERM);
     if (pid_cpu_sensor > 0) kill(pid_cpu_sensor, SIGTERM);
     if (pid_proc_sensor > 0) kill(pid_proc_sensor, SIGTERM);
-
+    
     if (pid_mem_sensor > 0) waitpid(pid_mem_sensor, NULL, 0);
     if (pid_cpu_sensor > 0) waitpid(pid_cpu_sensor, NULL, 0);
     if (pid_proc_sensor > 0) waitpid(pid_proc_sensor, NULL, 0);
-
+    
     unlink(PROC_FIFO_PATH);
     unlink(CPU_FIFO_PATH);
 }
 
 void handler(int sig) {
-    cleanup_children_and_fifos();
-    _exit(0);
+    (void)sig;
+    running = 0;
 }
 
 static void cleanup_all(void) {
@@ -34,10 +36,52 @@ static void cleanup_all(void) {
     if (fd_proc != -1) close(fd_proc);
 }
 
+int fork_process(volatile pid_t* pid, char* args[]) {
+    *pid = fork();
+    if (*pid < 0) {
+        perror("Fork failed");
+        cleanup_all();
+        return 1;
+    } else if (*pid == 0) {
+        close(fd_pipe[0]);
+        execve(args[0], args, NULL);
+        perror("Failed to start sensor");
+        _exit(1);
+    }
+    return 0;
+}
+
+int create_fifo(const char* path) {
+    if (mkfifo(path, 0666) == -1 && errno != EEXIST) {
+        char error_message[128];
+        snprintf(error_message, sizeof(error_message), "Error creating %s", path);
+        perror(error_message);
+        cleanup_all();
+        return 1;
+    }
+    return 0;
+}
+
+int open_fifo(int* fd, const char* path, int flags) {
+    *fd = open(path, flags);
+    if (*fd == -1) {
+        char error_message[128];
+        snprintf(error_message, sizeof(error_message), "Error opening %s", path);
+        perror(error_message);
+        cleanup_all();
+        return 1;
+    }
+    return 0;
+}
+
 static ssize_t read_exact(int fd, void *buf, size_t count) {
     size_t total = 0;
     char *ptr = buf;
     while (total < count) {
+        if (!running) {
+            errno = EINTR;
+            return -1;
+        }
         ssize_t n = read(fd, ptr + total, count - total);
         if (n < 0) {
             if (errno == EINTR) {
@@ -76,74 +120,41 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    if (mkfifo(CPU_FIFO_PATH, 0666) == -1 && errno != EEXIST) {
-        perror("Error creating CPU_FIFO_PATH");
-        cleanup_all();
+    if (create_fifo(CPU_FIFO_PATH) != 0) {
         return 1;
     }
 
-    if (mkfifo(PROC_FIFO_PATH, 0666) == -1 && errno != EEXIST) {
-        perror("Error creating PROC_FIFO_PATH");
-        cleanup_all();
+    if (create_fifo(PROC_FIFO_PATH) != 0) {
         return 1;
     }
 
-    pid_mem_sensor = fork();
-    if (pid_mem_sensor < 0) {
-        perror("Fork failed");
-        cleanup_all();
+    char fd_str[16];
+    snprintf(fd_str, sizeof(fd_str), "%d", fd_pipe[1]);
+    char* mem_sensor_args[] = {"./bin/mem_sensor", fd_str, NULL};
+    if (fork_process(&pid_mem_sensor, mem_sensor_args) != 0) {
         return 1;
-    } else if (pid_mem_sensor == 0) {
-        close(fd_pipe[0]);
-        char fd_str[16];
-        snprintf(fd_str, sizeof(fd_str), "%d", fd_pipe[1]);
-        execl("./bin/mem_sensor", "./bin/mem_sensor", fd_str, NULL);
-        perror("Failed to start mem_sensor");
-        _exit(1);
     }
     close(fd_pipe[1]);
     fd_pipe[1] = -1;
 
-    pid_cpu_sensor = fork();
-    if (pid_cpu_sensor < 0) {
-        perror("Fork failed");
-        cleanup_all();
-        return 1;
-    } else if (pid_cpu_sensor == 0) {
-        close(fd_pipe[0]);
-        execl("./bin/cpu_sensor", "./bin/cpu_sensor", NULL);
-        perror("Failed to start cpu_sensor");
-        _exit(1);
-    }
-
-    pid_proc_sensor = fork();
-    if (pid_proc_sensor < 0) {
-        perror("Fork failed");
-        cleanup_all();
-        return 1;
-    } else if (pid_proc_sensor == 0) {
-        close(fd_pipe[0]);
-        execl("./bin/proc_sensor", "./bin/proc_sensor", NULL);
-        perror("Failed to start proc_sensor");
-        _exit(1);
-    }
-
-
-    fd_cpu = open(CPU_FIFO_PATH, O_RDONLY);
-    if (fd_cpu == -1) {
-        perror("Error opening CPU_FIFO_PATH");
-        cleanup_all();
+    char* cpu_sensor_args[] = {"./bin/cpu_sensor", NULL};
+    if (fork_process(&pid_cpu_sensor, cpu_sensor_args) != 0) {
         return 1;
     }
 
-    fd_proc = open(PROC_FIFO_PATH, O_RDONLY);
-    if (fd_proc == -1) {
-        perror("Error opening PROC_FIFO_PATH");
-        cleanup_all();
+    char* proc_sensor_args[] = {"./bin/proc_sensor", NULL};
+    if (fork_process(&pid_proc_sensor, proc_sensor_args) != 0) {
         return 1;
     }
 
-    while (1) {
+    if(open_fifo(&fd_cpu, CPU_FIFO_PATH, O_RDONLY) != 0) {
+        return 1;
+    }
+    if(open_fifo(&fd_proc, PROC_FIFO_PATH, O_RDONLY) != 0) {
+        return 1;
+    }
+
+    while (running) {
         MemData mem_data = {0};
         CpuData cpu_data = {0};
         ProcData proc_data = {0};
