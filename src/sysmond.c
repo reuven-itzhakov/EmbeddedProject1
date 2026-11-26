@@ -8,9 +8,27 @@ struct SensorState {
     int status;
 };
 
-struct SensorState mem_sensor = {0, {-1, -1}, -1, 0};
-struct SensorState cpu_sensor = {0, {-1, -1}, -1, 0};
-struct SensorState proc_sensor = {0, {-1, -1}, -1, 0};
+struct SensorState mem_sensor = {
+    .pid = 0, 
+    .fd_pipe = {-1, -1}, 
+    .fd = -1, 
+    .restarts = 0, 
+    .status = 0
+};
+struct SensorState cpu_sensor = {
+    .pid = 0, 
+    .fd_pipe = {-1, -1}, 
+    .fd = -1, 
+    .restarts = 0, 
+    .status = 0
+};
+struct SensorState proc_sensor = {
+    .pid = 0, 
+    .fd_pipe = {-1, -1}, 
+    .fd = -1, 
+    .restarts = 0, 
+    .status = 0
+};
 
 volatile sig_atomic_t running = 1;
 
@@ -90,6 +108,21 @@ int open_fifo(int* fd, const char* path, int flags) {
         perror(error_message);
         cleanup_all();
         return 1;
+    }
+    return 0;
+}
+
+int restart_process(struct SensorState* sensor, char* args[], char* fifo_path) {
+    close_process(sensor);
+    if(fifo_path != NULL) {
+        fork_process(&sensor->pid, args);
+        open_fifo(&sensor->fd, fifo_path, O_RDONLY);
+    } else {
+        pipe(sensor->fd_pipe);
+        char fd_str[16];
+        snprintf(fd_str, sizeof(fd_str), "%d", sensor->fd_pipe[1]);
+        args[1] = fd_str;
+        fork_process(&sensor->pid, args);
     }
     return 0;
 }
@@ -179,13 +212,16 @@ int main(int argc, char *argv[]) {
         CpuData cpu_data = {0};
         ProcData proc_data = {0};
 
-        ssize_t r_mem = read_exact(mem_sensor.fd_pipe[0], &mem_data, sizeof(MemData));
-        ssize_t r_cpu = read_exact(cpu_sensor.fd, &cpu_data, sizeof(CpuData));
-        ssize_t r_proc = read_exact(proc_sensor.fd, &proc_data, sizeof(ProcData));
-
-        if (r_mem <= 0 || r_cpu <= 0 || r_proc <= 0) {
-            break;
+        if (read_exact(mem_sensor.fd_pipe[0], &mem_data, sizeof(MemData)) <= 0) {
+            restart_process(&mem_sensor, mem_sensor_args, NULL);
         }
+        if (read_exact(cpu_sensor.fd, &cpu_data, sizeof(CpuData)) <= 0) {
+            restart_process(&cpu_sensor, cpu_sensor_args, CPU_FIFO_PATH);
+        }
+        if (read_exact(proc_sensor.fd, &proc_data, sizeof(ProcData)) <= 0) {
+            restart_process(&proc_sensor, proc_sensor_args, PROC_FIFO_PATH);
+        }
+
         system("clear");
         printf("MemTotal: %ld KB\n", mem_data.mem_total);
         printf("MemFree: %ld KB\n", mem_data.mem_free);
