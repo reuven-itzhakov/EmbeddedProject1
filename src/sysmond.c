@@ -1,24 +1,27 @@
 #include "sysmon_ipc.h"
 
-volatile pid_t pid_mem_sensor = 0;
-volatile pid_t pid_cpu_sensor = 0;
-volatile pid_t pid_proc_sensor = 0;
+struct SensorState {
+    volatile pid_t pid;
+    int fd_pipe[2];
+    int fd;
+    int restarts;
+};
 
-static int fd_pipe[2] = {-1, -1};
-static int fd_cpu = -1;
-static int fd_proc = -1;
+struct SensorState mem_sensor = {0, {-1, -1}, -1, 0};
+struct SensorState cpu_sensor = {0, {-1, -1}, -1, 0};
+struct SensorState proc_sensor = {0, {-1, -1}, -1, 0};
 
 volatile sig_atomic_t running = 1;
 
 static void cleanup_children_and_fifos(void) {
-    if (pid_mem_sensor > 0) kill(pid_mem_sensor, SIGTERM);
-    if (pid_cpu_sensor > 0) kill(pid_cpu_sensor, SIGTERM);
-    if (pid_proc_sensor > 0) kill(pid_proc_sensor, SIGTERM);
-    
-    if (pid_mem_sensor > 0) waitpid(pid_mem_sensor, NULL, 0);
-    if (pid_cpu_sensor > 0) waitpid(pid_cpu_sensor, NULL, 0);
-    if (pid_proc_sensor > 0) waitpid(pid_proc_sensor, NULL, 0);
-    
+    if (mem_sensor.pid > 0) kill(mem_sensor.pid, SIGTERM);
+    if (cpu_sensor.pid > 0) kill(cpu_sensor.pid, SIGTERM);
+    if (proc_sensor.pid > 0) kill(proc_sensor.pid, SIGTERM);
+
+    if (mem_sensor.pid > 0) waitpid(mem_sensor.pid, NULL, 0);
+    if (cpu_sensor.pid > 0) waitpid(cpu_sensor.pid, NULL, 0);
+    if (proc_sensor.pid > 0) waitpid(proc_sensor.pid, NULL, 0);
+
     unlink(PROC_FIFO_PATH);
     unlink(CPU_FIFO_PATH);
 }
@@ -30,10 +33,10 @@ void handler(int sig) {
 
 static void cleanup_all(void) {
     cleanup_children_and_fifos();
-    if (fd_pipe[0] != -1) close(fd_pipe[0]);
-    if (fd_pipe[1] != -1) close(fd_pipe[1]);
-    if (fd_cpu != -1) close(fd_cpu);
-    if (fd_proc != -1) close(fd_proc);
+    if (mem_sensor.fd_pipe[0] != -1) close(mem_sensor.fd_pipe[0]);
+    if (mem_sensor.fd_pipe[1] != -1) close(mem_sensor.fd_pipe[1]);
+    if (cpu_sensor.fd != -1) close(cpu_sensor.fd);
+    if (proc_sensor.fd != -1) close(proc_sensor.fd);
 }
 
 int fork_process(volatile pid_t* pid, char* args[]) {
@@ -43,7 +46,7 @@ int fork_process(volatile pid_t* pid, char* args[]) {
         cleanup_all();
         return 1;
     } else if (*pid == 0) {
-        close(fd_pipe[0]);
+        close(mem_sensor.fd_pipe[0]);
         execve(args[0], args, NULL);
         perror("Failed to start sensor");
         _exit(1);
@@ -115,7 +118,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    if (pipe(fd_pipe) == -1) {
+    if (pipe(mem_sensor.fd_pipe) == -1) {
         perror("pipe failed");
         return 1;
     }
@@ -129,28 +132,28 @@ int main(int argc, char *argv[]) {
     }
 
     char fd_str[16];
-    snprintf(fd_str, sizeof(fd_str), "%d", fd_pipe[1]);
+    snprintf(fd_str, sizeof(fd_str), "%d", mem_sensor.fd_pipe[1]);
     char* mem_sensor_args[] = {"./bin/mem_sensor", fd_str, NULL};
-    if (fork_process(&pid_mem_sensor, mem_sensor_args) != 0) {
+    if (fork_process(&mem_sensor.pid, mem_sensor_args) != 0) {
         return 1;
     }
-    close(fd_pipe[1]);
-    fd_pipe[1] = -1;
+    close(mem_sensor.fd_pipe[1]);
+    mem_sensor.fd_pipe[1] = -1;
 
     char* cpu_sensor_args[] = {"./bin/cpu_sensor", NULL};
-    if (fork_process(&pid_cpu_sensor, cpu_sensor_args) != 0) {
+    if (fork_process(&cpu_sensor.pid, cpu_sensor_args) != 0) {
         return 1;
     }
 
     char* proc_sensor_args[] = {"./bin/proc_sensor", NULL};
-    if (fork_process(&pid_proc_sensor, proc_sensor_args) != 0) {
+    if (fork_process(&proc_sensor.pid, proc_sensor_args) != 0) {
         return 1;
     }
 
-    if(open_fifo(&fd_cpu, CPU_FIFO_PATH, O_RDONLY) != 0) {
+    if(open_fifo(&cpu_sensor.fd, CPU_FIFO_PATH, O_RDONLY) != 0) {
         return 1;
     }
-    if(open_fifo(&fd_proc, PROC_FIFO_PATH, O_RDONLY) != 0) {
+    if(open_fifo(&proc_sensor.fd, PROC_FIFO_PATH, O_RDONLY) != 0) {
         return 1;
     }
 
@@ -159,9 +162,9 @@ int main(int argc, char *argv[]) {
         CpuData cpu_data = {0};
         ProcData proc_data = {0};
 
-        ssize_t r_mem = read_exact(fd_pipe[0], &mem_data, sizeof(MemData));
-        ssize_t r_cpu = read_exact(fd_cpu, &cpu_data, sizeof(CpuData));
-        ssize_t r_proc = read_exact(fd_proc, &proc_data, sizeof(ProcData));
+        ssize_t r_mem = read_exact(mem_sensor.fd_pipe[0], &mem_data, sizeof(MemData));
+        ssize_t r_cpu = read_exact(cpu_sensor.fd, &cpu_data, sizeof(CpuData));
+        ssize_t r_proc = read_exact(proc_sensor.fd, &proc_data, sizeof(ProcData));
 
         if (r_mem <= 0 || r_cpu <= 0 || r_proc <= 0) {
             break;
