@@ -5,6 +5,7 @@ struct SensorState {
     int fd_pipe[2];
     int fd;
     int restarts;
+    int status;
 };
 
 struct SensorState mem_sensor = {0, {-1, -1}, -1, 0};
@@ -13,30 +14,46 @@ struct SensorState proc_sensor = {0, {-1, -1}, -1, 0};
 
 volatile sig_atomic_t running = 1;
 
-static void cleanup_children_and_fifos(void) {
-    if (mem_sensor.pid > 0) kill(mem_sensor.pid, SIGTERM);
-    if (cpu_sensor.pid > 0) kill(cpu_sensor.pid, SIGTERM);
-    if (proc_sensor.pid > 0) kill(proc_sensor.pid, SIGTERM);
-
-    if (mem_sensor.pid > 0) waitpid(mem_sensor.pid, NULL, 0);
-    if (cpu_sensor.pid > 0) waitpid(cpu_sensor.pid, NULL, 0);
-    if (proc_sensor.pid > 0) waitpid(proc_sensor.pid, NULL, 0);
-
-    unlink(PROC_FIFO_PATH);
-    unlink(CPU_FIFO_PATH);
-}
-
 void handler(int sig) {
     (void)sig;
     running = 0;
 }
 
+int close_process(struct SensorState* sensor) {
+    int status = 0;
+    if (sensor->pid > 0) {
+        kill(sensor->pid, SIGTERM);
+        waitpid(sensor->pid, &status, 0);
+        sensor->pid = 0;
+    }
+    if (sensor->fd_pipe[0] != -1) {
+        close(sensor->fd_pipe[0]);
+        sensor->fd_pipe[0] = -1;
+    }
+    if (sensor->fd_pipe[1] != -1) {
+        close(sensor->fd_pipe[1]);
+        sensor->fd_pipe[1] = -1;
+    }
+    if (sensor->fd != -1) {
+        close(sensor->fd);
+        sensor->fd = -1;
+    }
+    if(WIFEXITED(status)) {
+        sensor->status = WEXITSTATUS(status);
+    } else if(WIFSIGNALED(status)) {
+        sensor->status = WTERMSIG(status);
+    }
+    sensor->restarts++;
+    return sensor->status;
+}
+
 static void cleanup_all(void) {
-    cleanup_children_and_fifos();
-    if (mem_sensor.fd_pipe[0] != -1) close(mem_sensor.fd_pipe[0]);
-    if (mem_sensor.fd_pipe[1] != -1) close(mem_sensor.fd_pipe[1]);
-    if (cpu_sensor.fd != -1) close(cpu_sensor.fd);
-    if (proc_sensor.fd != -1) close(proc_sensor.fd);
+    close_process(&mem_sensor);
+    close_process(&cpu_sensor);
+    close_process(&proc_sensor);
+
+    unlink(PROC_FIFO_PATH);
+    unlink(CPU_FIFO_PATH);
 }
 
 int fork_process(volatile pid_t* pid, char* args[]) {
