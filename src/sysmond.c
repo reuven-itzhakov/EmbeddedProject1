@@ -271,9 +271,14 @@ int main(int argc, char *argv[]) {
         printf("Load 5: %.2f\n", cpu_data.load5);
         printf("Load 15: %.2f\n", cpu_data.load15);
         printf("Process: %d\n", proc_data.total_procs);
-        if(last_msg[0] != '\0') {
-            printf("%s", last_msg);
-            last_msg[0] = '\0';
+        if(mem_sensor.restarts > 0) {
+            printf("Mem Sensor (PID %d) %s by signal %d. Restarted %d times.\n", mem_sensor.pid, mem_sensor.terminated_by_signal ? "killed" : "exited", mem_sensor.status, mem_sensor.restarts);
+        }
+        if(cpu_sensor.restarts > 0) {
+            printf("CPU Sensor (PID %d) %s by signal %d. Restarted %d times.\n", cpu_sensor.pid, cpu_sensor.terminated_by_signal ? "killed" : "exited", cpu_sensor.status, cpu_sensor.restarts);
+        }
+        if(proc_sensor.restarts > 0) {
+            printf("Process Sensor (PID %d) %s by signal %d. Restarted %d times.\n", proc_sensor.pid, proc_sensor.terminated_by_signal ? "killed" : "exited", proc_sensor.status, proc_sensor.restarts);
         }
         fflush(stdout);
     }
