@@ -22,7 +22,6 @@
 
 #define MAX_MESSAGES 10
 
-
 typedef struct {
     long mem_total;
     long mem_free;

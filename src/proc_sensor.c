@@ -1,15 +1,16 @@
-#include "sysmon_ipc.h"
+#include <sysmon_ipc.h>
 
 static volatile sig_atomic_t running = 1;
 
 void handler(int sig) {
+    (void)sig;
     running = 0;
 }
 
 int main(int argc, char *argv[]) {
     if (argc > 1 && strcmp(argv[1], "--help") == 0) {
         printf("Usage: %s\n", argv[0]);
-        printf("This program reads data from process sensor and writes it to the process FIFO.\n");
+        printf("This program reads data from process sensor and sends it to the process message queue.\n");
         return 0;
     }
 
@@ -22,17 +23,9 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    if (mkfifo(PROC_FIFO_PATH, 0666) == -1 && errno != EEXIST) {
-        perror("Error creating PROC_FIFO_PATH");
-        return 1;
-    }
-
-    int fd = open(PROC_FIFO_PATH, O_WRONLY);
-    if (fd == -1) {
-        if (!running && errno == EINTR) {
-            return 0;
-        }
-        perror("Error opening PROC_FIFO_PATH");
+    mqd_t mqd = mq_open(PROC_QUEUE_NAME, O_WRONLY);
+    if (mqd == (mqd_t)-1) {
+        perror("mq_open proc");
         return 1;
     }
 
@@ -40,7 +33,7 @@ int main(int argc, char *argv[]) {
         DIR *dir = opendir("/proc");
         if (dir == NULL) {
             perror("Error opening /proc");
-            close(fd);
+            mq_close(mqd);
             return 1;
         }
 
@@ -57,18 +50,18 @@ int main(int argc, char *argv[]) {
         ProcData proc_data = {0};
         proc_data.total_procs = total;
 
-        if (write(fd, &proc_data, sizeof(ProcData)) != sizeof(ProcData)) {
-            if (!running || errno == EINTR || errno == EPIPE) {
+        if (mq_send(mqd, (const char *)&proc_data, sizeof(ProcData), 1) == -1) {
+            if (!running || errno == EINTR) {
                 break;
             }
-            perror("Error writing to PROC_FIFO_PATH");
-            close(fd);
+            perror("mq_send proc");
+            mq_close(mqd);
             return 1;
         }
 
         sleep(INTERVAL);
     }
 
-    close(fd);
+    mq_close(mqd);
     return 0;
 }

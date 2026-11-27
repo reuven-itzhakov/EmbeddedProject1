@@ -1,15 +1,16 @@
-#include "sysmon_ipc.h"
+#include <sysmon_ipc.h>
 
 static volatile sig_atomic_t running = 1;
 
 void handler(int sig) {
+    (void)sig;
     running = 0;
 }
 
 int main(int argc, char *argv[]) {
     if (argc > 1 && strcmp(argv[1], "--help") == 0) {
         printf("Usage: %s\n", argv[0]);
-        printf("This program reads data from CPU sensor and writes it to the CPU FIFO.\n");
+        printf("This program reads data from CPU sensor and sends it to the CPU message queue.\n");
         return 0;
     }
 
@@ -22,17 +23,9 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    if (mkfifo(CPU_FIFO_PATH, 0666) == -1 && errno != EEXIST) {
-        perror("Error creating CPU_FIFO_PATH");
-        return 1;
-    }
-
-    int fd = open(CPU_FIFO_PATH, O_WRONLY);
-    if (fd == -1) {
-        if (!running && errno == EINTR) {
-            return 0;
-        }
-        perror("Error opening CPU_FIFO_PATH");
+    mqd_t mqd = mq_open(CPU_QUEUE_NAME, O_WRONLY);
+    if (mqd == (mqd_t)-1) {
+        perror("mq_open cpu");
         return 1;
     }
 
@@ -40,7 +33,7 @@ int main(int argc, char *argv[]) {
         FILE *file = fopen("/proc/loadavg", "r");
         if (file == NULL) {
             perror("Error opening /proc/loadavg");
-            close(fd);
+            mq_close(mqd);
             return 1;
         }
 
@@ -54,18 +47,20 @@ int main(int argc, char *argv[]) {
             continue;
         }
 
-        if (write(fd, &cpu_data, sizeof(CpuData)) != sizeof(CpuData)) {
-            if (!running || errno == EINTR || errno == EPIPE) {
+        unsigned int priority = (cpu_data.load1 > 1.50) ? 10 : 1;
+
+        if (mq_send(mqd, (const char *)&cpu_data, sizeof(CpuData), priority) == -1) {
+            if (!running || errno == EINTR) {
                 break;
             }
-            perror("Error writing to CPU_FIFO_PATH");
-            close(fd);
+            perror("mq_send cpu");
+            mq_close(mqd);
             return 1;
         }
 
         sleep(INTERVAL);
     }
 
-    close(fd);
+    mq_close(mqd);
     return 0;
 }

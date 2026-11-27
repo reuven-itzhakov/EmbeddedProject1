@@ -1,23 +1,71 @@
-#include "sysmon_ipc.h"
+#include <sysmon_ipc.h>
 
-volatile pid_t pid_mem_sensor;
-volatile pid_t pid_cpu_sensor;
-volatile pid_t pid_proc_sensor;
+static pid_t mem_pid = -1;
+static pid_t cpu_pid = -1;
+static pid_t proc_pid = -1;
 
-volatile sig_atomic_t running = 1;
+static mqd_t mem_mqd = (mqd_t)-1;
+static mqd_t cpu_mqd = (mqd_t)-1;
+static mqd_t proc_mqd = (mqd_t)-1;
+
+static volatile sig_atomic_t running = 1;
+
+void cleanup_all(void) {
+    if (mem_pid > 0) {
+        kill(mem_pid, SIGTERM);
+        waitpid(mem_pid, NULL, 0);
+        mem_pid = -1;
+    }
+    if (cpu_pid > 0) {
+        kill(cpu_pid, SIGTERM);
+        waitpid(cpu_pid, NULL, 0);
+        cpu_pid = -1;
+    }
+    if (proc_pid > 0) {
+        kill(proc_pid, SIGTERM);
+        waitpid(proc_pid, NULL, 0);
+        proc_pid = -1;
+    }
+
+    if (mem_mqd != (mqd_t)-1) {
+        mq_close(mem_mqd);
+        mem_mqd = (mqd_t)-1;
+    }
+    if (cpu_mqd != (mqd_t)-1) {
+        mq_close(cpu_mqd);
+        cpu_mqd = (mqd_t)-1;
+    }
+    if (proc_mqd != (mqd_t)-1) {
+        mq_close(proc_mqd);
+        proc_mqd = (mqd_t)-1;
+    }
+
+    mq_unlink(MEM_QUEUE_NAME);
+    mq_unlink(CPU_QUEUE_NAME);
+    mq_unlink(PROC_QUEUE_NAME);
+}
 
 void handler(int sig) {
     (void)sig;
     running = 0;
 }
 
-int fork_process(volatile pid_t* pid, char* args[]) {
+int fork_process(pid_t *pid, char *args[]) {
     *pid = fork();
     if (*pid < 0) {
         perror("Fork failed");
-        cleanup_all();
         return 1;
     } else if (*pid == 0) {
+        if (mem_mqd != (mqd_t)-1) {
+            mq_close(mem_mqd);
+        }
+        if (cpu_mqd != (mqd_t)-1) {
+            mq_close(cpu_mqd);
+        }
+        if (proc_mqd != (mqd_t)-1) {
+            mq_close(proc_mqd);
+        }
+
         execve(args[0], args, NULL);
         perror("Failed to start sensor");
         _exit(1);
@@ -43,18 +91,58 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    char* mem_sensor_args[] = {"./bin/mem_sensor", NULL};
-    if (fork_process(&pid_mem_sensor, mem_sensor_args) != 0) {
+    struct mq_attr mem_attr = {0};
+    mem_attr.mq_maxmsg = MAX_MESSAGES;
+    mem_attr.mq_msgsize = sizeof(MemData);
+
+    struct mq_attr cpu_attr = {0};
+    cpu_attr.mq_maxmsg = MAX_MESSAGES;
+    cpu_attr.mq_msgsize = sizeof(CpuData);
+
+    struct mq_attr proc_attr = {0};
+    proc_attr.mq_maxmsg = MAX_MESSAGES;
+    proc_attr.mq_msgsize = sizeof(ProcData);
+
+    mq_unlink(MEM_QUEUE_NAME);
+    mq_unlink(CPU_QUEUE_NAME);
+    mq_unlink(PROC_QUEUE_NAME);
+
+    mem_mqd = mq_open(MEM_QUEUE_NAME, O_CREAT | O_RDONLY, 0666, &mem_attr);
+    if (mem_mqd == (mqd_t)-1) {
+        perror("mq_open mem");
+        cleanup_all();
         return 1;
     }
 
-    char* cpu_sensor_args[] = {"./bin/cpu_sensor", NULL};
-    if (fork_process(&pid_cpu_sensor, cpu_sensor_args) != 0) {
+    cpu_mqd = mq_open(CPU_QUEUE_NAME, O_CREAT | O_RDONLY, 0666, &cpu_attr);
+    if (cpu_mqd == (mqd_t)-1) {
+        perror("mq_open cpu");
+        cleanup_all();
         return 1;
     }
 
-    char* proc_sensor_args[] = {"./bin/proc_sensor", NULL};
-    if (fork_process(&pid_proc_sensor, proc_sensor_args) != 0) {
+    proc_mqd = mq_open(PROC_QUEUE_NAME, O_CREAT | O_RDONLY, 0666, &proc_attr);
+    if (proc_mqd == (mqd_t)-1) {
+        perror("mq_open proc");
+        cleanup_all();
+        return 1;
+    }
+
+    char *mem_args[] = {"./bin/mem_sensor", NULL};
+    if (fork_process(&mem_pid, mem_args) != 0) {
+        cleanup_all();
+        return 1;
+    }
+
+    char *cpu_args[] = {"./bin/cpu_sensor", NULL};
+    if (fork_process(&cpu_pid, cpu_args) != 0) {
+        cleanup_all();
+        return 1;
+    }
+
+    char *proc_args[] = {"./bin/proc_sensor", NULL};
+    if (fork_process(&proc_pid, proc_args) != 0) {
+        cleanup_all();
         return 1;
     }
 
@@ -62,6 +150,34 @@ int main(int argc, char *argv[]) {
         MemData mem_data = {0};
         CpuData cpu_data = {0};
         ProcData proc_data = {0};
+
+        unsigned int mem_prio = 0;
+        unsigned int cpu_prio = 0;
+        unsigned int proc_prio = 0;
+
+        if (mq_receive(mem_mqd, (char *)&mem_data, sizeof(MemData), &mem_prio) == -1) {
+            if (!running || errno == EINTR) {
+                break;
+            }
+            perror("mq_receive mem");
+            break;
+        }
+
+        if (mq_receive(cpu_mqd, (char *)&cpu_data, sizeof(CpuData), &cpu_prio) == -1) {
+            if (!running || errno == EINTR) {
+                break;
+            }
+            perror("mq_receive cpu");
+            break;
+        }
+
+        if (mq_receive(proc_mqd, (char *)&proc_data, sizeof(ProcData), &proc_prio) == -1) {
+            if (!running || errno == EINTR) {
+                break;
+            }
+            perror("mq_receive proc");
+            break;
+        }
 
         system("clear");
         printf("MemTotal: %ld KB\n", mem_data.mem_total);
@@ -73,6 +189,9 @@ int main(int argc, char *argv[]) {
         printf("Load 5: %.2f\n", cpu_data.load5);
         printf("Load 15: %.2f\n", cpu_data.load15);
         printf("Process: %d\n", proc_data.total_procs);
+        printf("Memory (PID %d) priority: %u\n", mem_pid, mem_prio);
+        printf("CPU (PID %d) priority: %u\n", cpu_pid, cpu_prio);
+        printf("Process (PID %d) priority: %u\n", proc_pid, proc_prio);
         fflush(stdout);
     }
 

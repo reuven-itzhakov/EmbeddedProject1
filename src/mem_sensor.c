@@ -1,23 +1,17 @@
-#include "sysmon_ipc.h"
+#include <sysmon_ipc.h>
 
 static volatile sig_atomic_t running = 1;
 
 void handler(int sig) {
+    (void)sig;
     running = 0;
 }
 
 int main(int argc, char *argv[]) {
     if (argc > 1 && strcmp(argv[1], "--help") == 0) {
-        printf("Usage: %s [fd]\n", argv[0]);
-        printf("This program reads data from memory sensor and writes it to a file descriptor.\n");
+        printf("Usage: %s\n", argv[0]);
+        printf("This program reads data from memory sensor and sends it to the memory message queue.\n");
         return 0;
-    }
-    int fd = argc > 1 && atoi(argv[1]) != 0 ? atoi(argv[1]) : STDOUT_FILENO;
-    
-    FILE* fifo = fdopen(fd, "w");
-    if(fifo == NULL){
-        perror("Error opening FIFO");
-        return 1;
     }
 
     struct sigaction sa;
@@ -29,11 +23,17 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    mqd_t mqd = mq_open(MEM_QUEUE_NAME, O_WRONLY);
+    if (mqd == (mqd_t)-1) {
+        perror("mq_open mem");
+        return 1;
+    }
+
     while (running) {
         FILE *file = fopen("/proc/meminfo", "r");
         if (file == NULL) {
             perror("Error opening /proc/meminfo");
-            fclose(fifo);
+            mq_close(mqd);
             return 1;
         }
 
@@ -52,17 +52,20 @@ int main(int argc, char *argv[]) {
                 mem_data.swap_free = strtol(buffer + 9, NULL, 10);
             }
         }
-
         fclose(file);
-        if(fwrite(&mem_data, sizeof(MemData), 1, fifo) != 1) {
-            perror("Error writing memory data");
-            fclose(fifo);
+
+        if (mq_send(mqd, (const char *)&mem_data, sizeof(MemData), 1) == -1) {
+            if (!running || errno == EINTR) {
+                break;
+            }
+            perror("mq_send mem");
+            mq_close(mqd);
             return 1;
         }
-        fflush(fifo);
 
         sleep(INTERVAL);
     }
-    
+
+    mq_close(mqd);
     return 0;
 }
