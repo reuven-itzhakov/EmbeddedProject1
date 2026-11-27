@@ -6,6 +6,7 @@ struct SensorState {
     int fd;
     int restarts;
     int status;
+    int terminated_by_signal;
 };
 
 struct SensorState mem_sensor = {
@@ -31,6 +32,7 @@ struct SensorState proc_sensor = {
 };
 
 volatile sig_atomic_t running = 1;
+char last_msg[128];
 
 void handler(int sig) {
     (void)sig;
@@ -56,12 +58,18 @@ int close_process(struct SensorState* sensor) {
         close(sensor->fd);
         sensor->fd = -1;
     }
-    if(WIFEXITED(status)) {
-        sensor->status = WEXITSTATUS(status);
-    } else if(WIFSIGNALED(status)) {
+
+    sensor->terminated_by_signal = 0;
+sensor->status = 0;
+
+    if (WIFSIGNALED(status)) {
+        sensor->terminated_by_signal = 1;
         sensor->status = WTERMSIG(status);
+    } else if (WIFEXITED(status)) {
+        sensor->terminated_by_signal = 0;
+        sensor->status = WEXITSTATUS(status);
     }
-    sensor->restarts++;
+
     return sensor->status;
 }
 
@@ -82,6 +90,8 @@ int fork_process(volatile pid_t* pid, char* args[]) {
         return 1;
     } else if (*pid == 0) {
         close(mem_sensor.fd_pipe[0]);
+        close(cpu_sensor.fd);
+        close(proc_sensor.fd);
         execve(args[0], args, NULL);
         perror("Failed to start sensor");
         _exit(1);
@@ -112,18 +122,44 @@ int open_fifo(int* fd, const char* path, int flags) {
     return 0;
 }
 
-int restart_process(struct SensorState* sensor, char* args[], char* fifo_path) {
+int restart_process(struct SensorState* sensor, char* args[], char* buffer, size_t buffer_size, int is_fifo) {
+    int pid = sensor->pid;
     close_process(sensor);
-    if(fifo_path != NULL) {
-        fork_process(&sensor->pid, args);
-        open_fifo(&sensor->fd, fifo_path, O_RDONLY);
+    
+    if(is_fifo) {
+        if(fork_process(&sensor->pid, args) != 0) {
+            return 1;
+        }
+        if(open_fifo(&sensor->fd, buffer, O_RDONLY) != 0) {
+            return 1;
+        }
     } else {
-        pipe(sensor->fd_pipe);
-        char fd_str[16];
-        snprintf(fd_str, sizeof(fd_str), "%d", sensor->fd_pipe[1]);
-        args[1] = fd_str;
-        fork_process(&sensor->pid, args);
+        if(pipe(sensor->fd_pipe) == -1) {
+            perror("pipe failed");
+            cleanup_all();
+            return 1;
+        }
+        snprintf(buffer, buffer_size, "%d", sensor->fd_pipe[1]);
+        args[1] = buffer;
+        if(fork_process(&sensor->pid, args) != 0) {
+            return 1;
+        }
+        close(sensor->fd_pipe[1]);
+        sensor->fd_pipe[1] = -1;
     }
+
+    sensor->restarts++;
+
+    if (sensor->terminated_by_signal) {
+    snprintf(last_msg, sizeof(last_msg),
+             "Sensor (PID %d) killed by signal %d. Restarted %d times.\n",
+             pid, sensor->status, sensor->restarts);
+    } else {
+    snprintf(last_msg, sizeof(last_msg),
+             "Sensor (PID %d) exited with code %d. Restarted %d times.\n",
+             pid, sensor->status, sensor->restarts);
+}
+
     return 0;
 }
 
@@ -181,9 +217,9 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    char fd_str[16];
-    snprintf(fd_str, sizeof(fd_str), "%d", mem_sensor.fd_pipe[1]);
-    char* mem_sensor_args[] = {"./bin/mem_sensor", fd_str, NULL};
+    char buffer[64];
+    snprintf(buffer, sizeof(buffer), "%d", mem_sensor.fd_pipe[1]);
+    char* mem_sensor_args[] = {"./bin/mem_sensor", buffer, NULL};
     if (fork_process(&mem_sensor.pid, mem_sensor_args) != 0) {
         return 1;
     }
@@ -212,14 +248,17 @@ int main(int argc, char *argv[]) {
         CpuData cpu_data = {0};
         ProcData proc_data = {0};
 
-        if (read_exact(mem_sensor.fd_pipe[0], &mem_data, sizeof(MemData)) <= 0) {
-            restart_process(&mem_sensor, mem_sensor_args, NULL);
+        if (running && read_exact(mem_sensor.fd_pipe[0], &mem_data, sizeof(MemData)) <= 0) {
+            restart_process(&mem_sensor, mem_sensor_args, buffer, sizeof(buffer), 0);
+            continue;
         }
-        if (read_exact(cpu_sensor.fd, &cpu_data, sizeof(CpuData)) <= 0) {
-            restart_process(&cpu_sensor, cpu_sensor_args, CPU_FIFO_PATH);
+        if (running && read_exact(cpu_sensor.fd, &cpu_data, sizeof(CpuData)) <= 0) {
+            restart_process(&cpu_sensor, cpu_sensor_args, CPU_FIFO_PATH, 0, 1);
+            continue;
         }
-        if (read_exact(proc_sensor.fd, &proc_data, sizeof(ProcData)) <= 0) {
-            restart_process(&proc_sensor, proc_sensor_args, PROC_FIFO_PATH);
+        if (running && read_exact(proc_sensor.fd, &proc_data, sizeof(ProcData)) <= 0) {
+            restart_process(&proc_sensor, proc_sensor_args, PROC_FIFO_PATH, 0, 1);
+            continue;
         }
 
         system("clear");
@@ -232,6 +271,10 @@ int main(int argc, char *argv[]) {
         printf("Load 5: %.2f\n", cpu_data.load5);
         printf("Load 15: %.2f\n", cpu_data.load15);
         printf("Process: %d\n", proc_data.total_procs);
+        if(last_msg[0] != '\0') {
+            printf("%s", last_msg);
+            last_msg[0] = '\0';
+        }
         fflush(stdout);
     }
 
