@@ -2,10 +2,12 @@ CC = gcc
 BIN_DIR = bin
 INC_DIR = inc
 SRC_DIR = src
-CFLAG = -Wall -g -I$(INC_DIR)
+CFLAG = -Wall -Wextra -g -I$(INC_DIR)
+LDFLAGS = -lrt
+
 
 $(BIN_DIR)/%: $(SRC_DIR)/%.c
-	$(CC) $(CFLAG) $< -o $@
+	$(CC) $(CFLAG) $(LDFLAGS) $< -o $@
 
 all: $(BIN_DIR)/cpu_sensor $(BIN_DIR)/mem_sensor $(BIN_DIR)/proc_sensor $(BIN_DIR)/sysmond
 

@@ -12,10 +12,16 @@
 #include <fcntl.h>
 #include <dirent.h>
 #include <errno.h>
+#include <mqueue.h>
 
-#define CPU_FIFO_PATH  "/tmp/sysmon_cpu.fifo"
-#define PROC_FIFO_PATH "/tmp/sysmon_proc.fifo"
 #define INTERVAL 1
+
+#define MEM_QUEUE_NAME  "/sysmon_mem_mq"
+#define CPU_QUEUE_NAME  "/sysmon_cpu_mq"
+#define PROC_QUEUE_NAME "/sysmon_proc_mq"
+
+#define MAX_MESSAGES 10
+
 
 typedef struct {
     long mem_total;
